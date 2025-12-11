@@ -466,7 +466,7 @@ export class SimulationContext {
             fieldHeight: 0.5,    // meters
             fieldCenterX: 0,
             fieldCenterY: 0.15,
-            displayMode: 1,      // 0 = instantaneous, 1 = intensity
+            displayMode: 0,      // 0 = instantaneous (propagating waves), 1 = intensity
             dynamicRange: 40,    // dB
             profileDepth: 0.2,   // meters (for beam profile view)
             timeScale: 1.0,

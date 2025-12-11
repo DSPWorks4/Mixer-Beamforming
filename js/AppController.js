@@ -1,645 +1,509 @@
-/**
- * AppController.js - Main Application Controller
- * 
- * Orchestrates the simulation by connecting:
- * - Custom UI controls
- * - SimulationContext (data model)
- * - Renderers (visualization)
- * 
- * Handles the render loop and UI event binding
- */
-
 import { PhasedArray, SimulationContext } from './PhasedArray.js';
 import { HeatmapRenderer, BeamPatternRenderer, ArrayVisualizationRenderer } from './Renderers.js';
-import { getScenarioNames, getScenario } from './Scenarios.js';
+import { getScenario } from './Scenarios.js';
 
 export class AppController {
     constructor() {
-        // Core components
         this.context = new SimulationContext();
+
+        // Renderers
         this.heatmapRenderer = null;
         this.beamPatternRenderer = null;
         this.arrayVisRenderer = null;
 
-        // Animation state
-        this.isRunning = true;
-        this.time = 0;
-        this.lastFrameTime = 0;
-        this.frameCount = 0;
-        this.fps = 0;
-        this.fpsUpdateInterval = 500;
-        this.lastFpsUpdate = 0;
-
-        // Current selection
+        // State
         this.selectedArrayId = null;
         this.receivers = new Map();
-        this.selectedReceiverId = 'receiver1';
-        this.receiverCounter = 1;
+        this.selectedReceiverId = 'rx1';
+        this.time = 0;
+        this.lastTime = performance.now();
 
-        // Display options
-        this.showElements = true;
-        this.animateWaves = true;
-        this.timeScale = 1.0;
-
-        // Bind methods
-        this._animate = this._animate.bind(this);
-        this._onResize = this._onResize.bind(this);
+        // SMOOTHING STATE
+        // Stores { target: val, current: val } for properties
+        this.targets = new Map();
     }
 
-    /**
-     * Initialize the application
-     */
     init() {
-        // Get canvas elements
+        // Enforce Normalized Physics (Units = Wavelengths)
+        this.context.globalSettings.speedOfSound = 1.0;
+
+        // 1. Initialize Renderers
         const heatmapCanvas = document.getElementById('heatmap-canvas');
-        const overlayCanvas = document.getElementById('overlay-canvas');
-        const beamPatternCanvas = document.getElementById('beam-pattern-canvas');
-        const arrayVisCanvas = document.getElementById('array-vis-canvas');
+        const beamCanvas = document.getElementById('beam-pattern-canvas');
+        const visCanvas = document.getElementById('array-vis-canvas');
 
-        if (!heatmapCanvas) {
-            console.error('Canvas elements not found');
-            return;
-        }
+        if (heatmapCanvas) this.heatmapRenderer = new HeatmapRenderer(heatmapCanvas);
+        if (beamCanvas) this.beamPatternRenderer = new BeamPatternRenderer(beamCanvas);
+        if (visCanvas) this.arrayVisRenderer = new ArrayVisualizationRenderer(visCanvas);
 
-        // Initialize renderers
-        this.heatmapRenderer = new HeatmapRenderer(heatmapCanvas);
-        this.beamPatternRenderer = new BeamPatternRenderer(beamPatternCanvas);
-        this.arrayVisRenderer = new ArrayVisualizationRenderer(arrayVisCanvas);
-        this.overlayCanvas = overlayCanvas;
-        this.overlayCtx = overlayCanvas?.getContext('2d');
+        this.overlayCanvas = document.getElementById('overlay-canvas');
+        if (this.overlayCanvas) this.overlayCtx = this.overlayCanvas.getContext('2d');
 
-        // Initialize default receiver
-        this.receivers.set('receiver1', {
-            id: 'receiver1',
-            name: 'receiver1',
-            x: 0,
-            y: 5
-        });
+        // 2. Initialize Default Receiver
+        this._addReceiver();
 
-        // Setup resize handler
-        window.addEventListener('resize', this._onResize);
-        this._onResize();
+        // 3. Bind UI Events
+        this._bindEvents();
 
-        // Bind UI events
-        this._bindUIEvents();
+        // 4. Load Initial Scenario
+        this.loadScenario('5G_MIMO');
 
-        // Load default scenario
-        this._loadScenario('5G_MIMO');
-
-        // Start animation loop
-        this.lastFrameTime = performance.now();
-        requestAnimationFrame(this._animate);
+        // 5. Start Loop
+        this._animate();
     }
 
-    /**
-     * Handle window resize
-     * @private
-     */
-    _onResize() {
-        if (this.heatmapRenderer) this.heatmapRenderer.resize();
-        if (this.beamPatternRenderer) this.beamPatternRenderer.resize();
-        if (this.arrayVisRenderer) this.arrayVisRenderer.resize();
-
-        // Resize overlay canvas
-        if (this.overlayCanvas) {
-            const parent = this.overlayCanvas.parentElement;
-            const dpr = window.devicePixelRatio || 1;
-            this.overlayCanvas.width = parent.clientWidth * dpr;
-            this.overlayCanvas.height = parent.clientHeight * dpr;
+    _bindEvents() {
+        // --- Scenario Loading ---
+        const applyBtn = document.getElementById('apply-scenario');
+        if (applyBtn) {
+            applyBtn.addEventListener('click', () => {
+                this.loadScenario(document.getElementById('scenario-select').value);
+            });
         }
-    }
 
-    /**
-     * Bind all UI event handlers
-     * @private
-     */
-    _bindUIEvents() {
-        // Scenario controls
-        document.getElementById('apply-scenario')?.addEventListener('click', () => {
-            const scenario = document.getElementById('scenario-select').value;
-            this._loadScenario(scenario);
-        });
+        // --- Array Management ---
+        const addArrayBtn = document.getElementById('add-array');
+        if (addArrayBtn) addArrayBtn.addEventListener('click', () => this._addNewArray());
 
-        // Array controls
-        document.getElementById('add-array')?.addEventListener('click', () => this._addNewArray());
-        document.getElementById('save-array')?.addEventListener('click', () => this._saveCurrentArray());
-        document.getElementById('remove-array')?.addEventListener('click', () => this._removeCurrentArray());
+        const removeArrayBtn = document.getElementById('remove-array');
+        if (removeArrayBtn) removeArrayBtn.addEventListener('click', () => this._removeSelectedArray());
 
-        document.getElementById('array-select')?.addEventListener('change', (e) => {
-            this._selectArray(parseInt(e.target.value));
-        });
+        const arraySelect = document.getElementById('array-select');
+        if (arraySelect) arraySelect.addEventListener('change', (e) => this._selectArray(parseInt(e.target.value)));
 
-        // Geometry radio buttons
-        document.querySelectorAll('input[name="geometry"]').forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                const curvatureGroup = document.getElementById('curvature-group');
-                if (e.target.value === 'curved') {
-                    curvatureGroup.style.display = 'block';
+        // --- Array Properties (SMOOTH Updates) ---
+
+        const bindSlider = (id, prop, fmt, immediate = false) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                // Update label text immediately
+                const labelEl = document.getElementById(id.replace('sld', 'val'));
+                if (labelEl && fmt) labelEl.innerText = fmt(val);
+
+                if (immediate) {
+                    // Apply immediately for responsive controls
+                    const array = this.context.getArray(this.selectedArrayId);
+                    if (array) array[prop] = val;
                 } else {
-                    curvatureGroup.style.display = 'none';
+                    // Set TARGET for smoothing
+                    this._setTargetProperty(prop, val);
+                }
+
+                // Handle pitch slider enable/disable based on element count
+                if (prop === 'numElements') {
+                    this._updatePitchSliderState(Math.round(val));
+                }
+            });
+        };
+
+        // numElements, steeringAngle apply immediately; pitch/freq can smooth
+        bindSlider('sld-elem', 'numElements', v => Math.round(v), true);
+        bindSlider('sld-pitch', 'pitch', v => v.toFixed(1) + 'λ', true);
+        bindSlider('sld-curve', 'curvatureRadius', v => v + 'λ', true);
+        bindSlider('sld-freq', 'frequency', v => v.toFixed(1) + 'x', true);
+        bindSlider('sld-steer', 'steeringAngle', v => v + '°', true);
+
+        // Geometry Radios (Immediate)
+        document.querySelectorAll('input[name="geometry"]').forEach(r => {
+            r.addEventListener('change', (e) => {
+                const grpCurve = document.getElementById('grp-curve');
+                if (grpCurve) grpCurve.style.display = (e.target.value === 'curved') ? 'block' : 'none';
+
+                // Geometry changes are structural, apply immediately
+                const array = this.context.getArray(this.selectedArrayId);
+                if (array) {
+                    array.geometry = e.target.value;
+                    // Reset targets to prevent jumps
+                    this.targets.clear();
                 }
             });
         });
 
-        // Sliders with live update
-        this._bindSlider('transmitters-slider', 'transmitters-value', (v) => v);
-        this._bindSlider('spacing-slider', 'spacing-value', (v) => v + 'λ');
-        this._bindSlider('curvature-slider', 'curvature-value', (v) => v + 'm');
-        this._bindSlider('frequency-slider', 'frequency-value', (v) => v);
-        this._bindSlider('steering-slider', 'steering-value', (v) => v + '°');
-        this._bindSlider('timescale-slider', 'timescale-value', (v) => v, (v) => {
-            this.timeScale = parseFloat(v);
+        // Text Inputs (Name, Position)
+        ['pos-x', 'pos-y', 'array-name'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', () => this._updateArrayFromInputs());
         });
 
-        // Receiver controls
-        document.getElementById('add-receiver')?.addEventListener('click', () => this._addNewReceiver());
-        document.getElementById('save-receiver')?.addEventListener('click', () => this._saveCurrentReceiver());
-        document.getElementById('remove-receiver')?.addEventListener('click', () => this._removeCurrentReceiver());
+        // --- Receiver Management ---
+        const addRxBtn = document.getElementById('add-receiver');
+        if (addRxBtn) addRxBtn.addEventListener('click', () => this._addReceiver());
 
-        document.getElementById('receiver-select')?.addEventListener('change', (e) => {
-            this._selectReceiver(e.target.value);
-        });
+        const removeRxBtn = document.getElementById('remove-receiver');
+        if (removeRxBtn) removeRxBtn.addEventListener('click', () => this._removeReceiver());
 
-        // Display options
-        document.getElementById('show-elements')?.addEventListener('change', (e) => {
-            this.showElements = e.target.checked;
-        });
-
-        document.getElementById('animate-waves')?.addEventListener('change', (e) => {
-            this.animateWaves = e.target.checked;
-        });
-    }
-
-    /**
-     * Bind a slider to its value display
-     * @private
-     */
-    _bindSlider(sliderId, valueId, formatter, callback = null) {
-        const slider = document.getElementById(sliderId);
-        const valueDisplay = document.getElementById(valueId);
-
-        if (slider && valueDisplay) {
-            slider.addEventListener('input', (e) => {
-                valueDisplay.textContent = formatter(e.target.value);
-                if (callback) callback(e.target.value);
+        const rxSelect = document.getElementById('receiver-select');
+        if (rxSelect) {
+            rxSelect.addEventListener('change', (e) => {
+                this._selectReceiver(e.target.value);
+                this._updateInfoPanel(this.context.getArray(this.selectedArrayId));
             });
         }
+
+        // Receiver Position Inputs
+        ['rx-x', 'rx-y'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('input', () => {
+                    const rx = this.receivers.get(this.selectedReceiverId);
+                    if (rx) {
+                        rx.x = parseFloat(document.getElementById('rx-x').value) || 0;
+                        rx.y = parseFloat(document.getElementById('rx-y').value) || 0;
+                    }
+                });
+            }
+        });
+
+        const speedSld = document.getElementById('sld-speed');
+        if (speedSld) {
+            speedSld.addEventListener('input', (e) => {
+                this.context.globalSettings.timeScale = parseFloat(e.target.value);
+            });
+        }
+
+        window.addEventListener('resize', () => this._onResize());
     }
 
-    /**
-     * Load a scenario configuration
-     * @param {string} scenarioKey
-     * @private
-     */
-    _loadScenario(scenarioKey) {
-        const scenario = getScenario(scenarioKey);
-        if (!scenario) {
-            console.error('Scenario not found:', scenarioKey);
-            return;
-        }
+    _setTargetProperty(prop, value) {
+        if (!this.selectedArrayId) return;
+        const key = `${this.selectedArrayId}_${prop}`;
 
-        // Clear existing arrays
-        this.context.clearArrays();
+        // Handle Freq scaling: UI 1.0 -> Physics 1.0 (Normalized)
+        // If prop is frequency, we map slider 1.0 to 1.0 Hz in normalized physics
+        // so no multiplication needed if we stick to normalized units.
 
-        // Apply global settings
-        Object.assign(this.context.globalSettings, scenario.globalSettings);
-
-        // Create arrays
-        for (const arrayConfig of scenario.arrays) {
-            const array = new PhasedArray(arrayConfig);
-            this.context.addArray(array);
-        }
-
-        // Update array dropdown
-        this._updateArrayDropdown();
-
-        // Select first array
-        const arrays = this.context.getAllArrays();
-        if (arrays.length > 0) {
-            this._selectArray(arrays[0].id);
-        }
-
-        console.log(`Loaded scenario: ${scenario.name}`);
+        this.targets.set(key, value);
     }
 
-    /**
-     * Update the array selection dropdown
-     * @private
-     */
-    _updateArrayDropdown() {
-        const select = document.getElementById('array-select');
-        if (!select) return;
-
-        select.innerHTML = '';
-        const arrays = this.context.getAllArrays();
-
-        for (const array of arrays) {
-            const option = document.createElement('option');
-            option.value = array.id;
-            option.textContent = array.name;
-            select.appendChild(option);
-        }
-
-        if (this.selectedArrayId) {
-            select.value = this.selectedArrayId;
-        }
-    }
-
-    /**
-     * Select an array and update UI controls
-     * @private
-     */
-    _selectArray(arrayId) {
-        const array = this.context.getArray(arrayId);
-        if (!array) return;
-
-        this.selectedArrayId = arrayId;
-
-        // Update all controls
-        document.getElementById('transmitters-slider').value = array.numElements;
-        document.getElementById('transmitters-value').textContent = array.numElements;
-
-        // Pitch is already in wavelengths
-        document.getElementById('spacing-slider').value = array.pitch;
-        document.getElementById('spacing-value').textContent = array.pitch.toFixed(1) + 'λ';
-
-        document.getElementById('curvature-slider').value = array.curvatureRadius;
-        document.getElementById('curvature-value').textContent = array.curvatureRadius.toFixed(1) + 'λ';
-
-        // Frequency (normalized)
-        const freqNormalized = array.frequency / 40000;
-        document.getElementById('frequency-slider').value = freqNormalized;
-        document.getElementById('frequency-value').textContent = freqNormalized.toFixed(1);
-
-        document.getElementById('position-x').value = array.position.x.toFixed(1);
-        document.getElementById('position-y').value = array.position.y.toFixed(1);
-
-        document.getElementById('steering-slider').value = array.steeringAngle;
-        document.getElementById('steering-value').textContent = array.steeringAngle + '°';
-
-        document.getElementById('array-name').value = array.name;
-
-        // Geometry radio
-        if (array.geometry === 'curved') {
-            document.getElementById('geometry-curved').checked = true;
-            document.getElementById('curvature-group').style.display = 'block';
-        } else {
-            document.getElementById('geometry-linear').checked = true;
-            document.getElementById('curvature-group').style.display = 'none';
-        }
-
-        // Update info panel
-        this._updateInfoPanel();
-
-        // Update dropdown selection
-        const select = document.getElementById('array-select');
-        if (select) select.value = arrayId;
-    }
-
-    /**
-     * Save changes to current array
-     * @private
-     */
-    _saveCurrentArray() {
+    _smoothUpdate() {
         const array = this.context.getArray(this.selectedArrayId);
         if (!array) return;
 
-        // Read values from controls
-        array.numElements = parseInt(document.getElementById('transmitters-slider').value);
+        // Interpolation factor (0.1 = smooth, 0.5 = fast)
+        const lerp = (start, end, amt) => (1 - amt) * start + amt * end;
+        const alpha = 0.15;
 
-        // Pitch is directly in wavelengths
-        array.pitch = parseFloat(document.getElementById('spacing-slider').value);
+        this.targets.forEach((targetVal, key) => {
+            // Split only at first underscore to handle property names correctly
+            const underscoreIdx = key.indexOf('_');
+            if (underscoreIdx === -1) return;
+            const id = key.substring(0, underscoreIdx);
+            const prop = key.substring(underscoreIdx + 1);
 
-        array.curvatureRadius = parseFloat(document.getElementById('curvature-slider').value);
+            if (id != this.selectedArrayId) return;
 
-        const freqNormalized = parseFloat(document.getElementById('frequency-slider').value);
-        array.frequency = freqNormalized * 40000;
+            let currentVal = array[prop];
+            if (currentVal === undefined) return;
 
-        array.position = {
-            x: parseFloat(document.getElementById('position-x').value),
-            y: parseFloat(document.getElementById('position-y').value)
+            // Check threshold to stop updating
+            if (Math.abs(targetVal - currentVal) < 0.01) {
+                array[prop] = targetVal;
+                this.targets.delete(key);
+            } else {
+                array[prop] = lerp(currentVal, targetVal, alpha);
+            }
+        });
+    }
+
+    _updatePitchSliderState(numElements) {
+        const pitchSlider = document.getElementById('sld-pitch');
+        const pitchLabel = document.querySelector('.control-group:has(#sld-pitch) .control-label');
+
+        if (pitchSlider) {
+            if (numElements <= 1) {
+                pitchSlider.disabled = true;
+                pitchSlider.style.opacity = '0.4';
+                pitchSlider.style.cursor = 'not-allowed';
+            } else {
+                pitchSlider.disabled = false;
+                pitchSlider.style.opacity = '1';
+                pitchSlider.style.cursor = 'pointer';
+            }
+        }
+    }
+
+    _updateArrayFromInputs() {
+        const array = this.context.getArray(this.selectedArrayId);
+        if (!array) return;
+
+        const posX = document.getElementById('pos-x');
+        const posY = document.getElementById('pos-y');
+        const nameInput = document.getElementById('array-name');
+
+        if (posX && posY) {
+            array.position = {
+                x: parseFloat(posX.value) || 0,
+                y: parseFloat(posY.value) || 0
+            };
+        }
+
+        if (nameInput) {
+            array.name = nameInput.value;
+            const option = document.querySelector(`#array-select option[value="${array.id}"]`);
+            if (option) option.text = array.name;
+        }
+    }
+
+    loadScenario(key) {
+        const scenario = getScenario(key);
+        if (!scenario) return;
+
+        this.context.clearArrays();
+        this.targets.clear(); // Clear smoothing targets
+
+        if (scenario.globalSettings) {
+            this.context.globalSettings = { ...this.context.globalSettings, ...scenario.globalSettings };
+            // FORCE NORMALIZED SPEED
+            this.context.globalSettings.speedOfSound = 1.0;
+        }
+
+        if (scenario.arrays) {
+            scenario.arrays.forEach(conf => {
+                // Ensure array config matches normalized physics
+                conf.speedOfSound = 1.0;
+                // Scenario file might have 40000 Hz, map to 1.0
+                if (conf.frequency > 100) conf.frequency = 1.0;
+
+                const arr = new PhasedArray(conf);
+                this.context.addArray(arr);
+            });
+        }
+
+        this._refreshArrayDropdown();
+        const allArrays = this.context.getAllArrays();
+        if (allArrays.length > 0) {
+            this._selectArray(allArrays[0].id);
+        }
+    }
+
+    _refreshArrayDropdown() {
+        const sel = document.getElementById('array-select');
+        if (!sel) return;
+
+        sel.innerHTML = '';
+        this.context.getAllArrays().forEach(arr => {
+            const opt = document.createElement('option');
+            opt.value = arr.id;
+            opt.text = arr.name;
+            sel.appendChild(opt);
+        });
+    }
+
+    _selectArray(id) {
+        if (!id) return;
+        this.selectedArrayId = id;
+        const array = this.context.getArray(id);
+        if (!array) return;
+
+        // Clear smoothing targets on swap
+        this.targets.clear();
+
+        const arrSel = document.getElementById('array-select');
+        if (arrSel) arrSel.value = id;
+
+        const nameInput = document.getElementById('array-name');
+        if (nameInput) nameInput.value = array.name;
+
+        const posX = document.getElementById('pos-x');
+        const posY = document.getElementById('pos-y');
+        if (posX) posX.value = array.position.x;
+        if (posY) posY.value = array.position.y;
+
+        const setSlider = (id, val, textId, fmt) => {
+            const el = document.getElementById(id);
+            if (el) el.value = val;
+            const txt = document.getElementById(textId);
+            if (txt) txt.innerText = fmt(val);
         };
 
-        array.steeringAngle = parseInt(document.getElementById('steering-slider').value);
-        array.name = document.getElementById('array-name').value;
+        setSlider('sld-elem', array.numElements, 'val-elem', v => v);
+        setSlider('sld-pitch', array.pitch, 'val-pitch', v => v.toFixed(1) + 'λ');
+        setSlider('sld-curve', array.curvatureRadius, 'val-curve', v => v + 'λ');
+        setSlider('sld-freq', array.frequency, 'val-freq', v => v.toFixed(1) + 'x');
+        setSlider('sld-steer', array.steeringAngle, 'val-steer', v => v + '°');
 
-        // Geometry
-        array.geometry = document.querySelector('input[name="geometry"]:checked').value;
+        // Update pitch slider state based on element count
+        this._updatePitchSliderState(array.numElements);
 
-        // Update dropdown
-        this._updateArrayDropdown();
-        this._updateInfoPanel();
+        const radLin = document.getElementById('geo-lin');
+        const radCur = document.getElementById('geo-cur');
+        if (radLin && radCur) {
+            if (array.geometry === 'curved') radCur.checked = true;
+            else radLin.checked = true;
+        }
+
+        const grpCurve = document.getElementById('grp-curve');
+        if (grpCurve) grpCurve.style.display = array.geometry === 'curved' ? 'flex' : 'none';
+
+        this._updateInfoPanel(array);
     }
 
-    /**
-     * Add a new array
-     * @private
-     */
     _addNewArray() {
-        const arrays = this.context.getAllArrays();
-        const newArray = new PhasedArray({
-            name: `array ${arrays.length + 1}`,
+        // Default new array uses normalized physics
+        const arr = new PhasedArray({
+            name: 'New Array',
             numElements: 16,
-            pitch: 0.5,
-            frequency: 40000,
-            steeringAngle: 0,
-            position: { x: 0, y: 0 },
-            geometry: 'linear',
-            curvatureRadius: 5,
-            orientation: 0,
-            focalDistance: Infinity,
-            amplitude: 1.0,
-            speedOfSound: this.context.globalSettings.speedOfSound
+            frequency: 1.0,
+            speedOfSound: 1.0
         });
-
-        this.context.addArray(newArray);
-        this._updateArrayDropdown();
-        this._selectArray(newArray.id);
+        this.context.addArray(arr);
+        this._refreshArrayDropdown();
+        this._selectArray(arr.id);
     }
 
-    /**
-     * Remove current array
-     * @private
-     */
-    _removeCurrentArray() {
-        if (!this.selectedArrayId) return;
-
+    _removeSelectedArray() {
+        if (this.context.getAllArrays().length <= 1) {
+            alert("Cannot remove the last array.");
+            return;
+        }
         this.context.removeArray(this.selectedArrayId);
-        this._updateArrayDropdown();
-
-        const arrays = this.context.getAllArrays();
-        if (arrays.length > 0) {
-            this._selectArray(arrays[0].id);
-        } else {
-            this.selectedArrayId = null;
-        }
+        this._refreshArrayDropdown();
+        const first = this.context.getAllArrays()[0];
+        if (first) this._selectArray(first.id);
     }
 
-    /**
-     * Update the receiver dropdown
-     * @private
-     */
-    _updateReceiverDropdown() {
-        const select = document.getElementById('receiver-select');
-        if (!select) return;
-
-        select.innerHTML = '';
-
-        for (const [id, receiver] of this.receivers) {
-            const option = document.createElement('option');
-            option.value = id;
-            option.textContent = receiver.name;
-            select.appendChild(option);
-        }
-
-        if (this.selectedReceiverId) {
-            select.value = this.selectedReceiverId;
-        }
-    }
-
-    /**
-     * Select a receiver
-     * @private
-     */
-    _selectReceiver(receiverId) {
-        const receiver = this.receivers.get(receiverId);
-        if (!receiver) return;
-
-        this.selectedReceiverId = receiverId;
-
-        document.getElementById('receiver-x').value = receiver.x;
-        document.getElementById('receiver-y').value = receiver.y;
-        document.getElementById('receiver-name').value = receiver.name;
-    }
-
-    /**
-     * Save current receiver
-     * @private
-     */
-    _saveCurrentReceiver() {
-        const receiver = this.receivers.get(this.selectedReceiverId);
-        if (!receiver) return;
-
-        receiver.x = parseFloat(document.getElementById('receiver-x').value);
-        receiver.y = parseFloat(document.getElementById('receiver-y').value);
-        receiver.name = document.getElementById('receiver-name').value;
-
-        this._updateReceiverDropdown();
-    }
-
-    /**
-     * Add new receiver
-     * @private
-     */
-    _addNewReceiver() {
-        this.receiverCounter++;
-        const id = `receiver${this.receiverCounter}`;
-
-        this.receivers.set(id, {
-            id,
-            name: `receiver${this.receiverCounter}`,
-            x: 0,
-            y: 5
-        });
-
-        this._updateReceiverDropdown();
+    _addReceiver() {
+        const id = 'rx' + (this.receivers.size + 1 + Math.floor(Math.random() * 1000));
+        this.receivers.set(id, { id, name: 'Probe ' + (this.receivers.size + 1), x: 0, y: 10 });
+        this._refreshRxDropdown();
         this._selectReceiver(id);
     }
 
-    /**
-     * Remove current receiver
-     * @private
-     */
-    _removeCurrentReceiver() {
+    _refreshRxDropdown() {
+        const sel = document.getElementById('receiver-select');
+        if (!sel) return;
+        sel.innerHTML = '';
+        this.receivers.forEach(rx => {
+            const opt = document.createElement('option');
+            opt.value = rx.id;
+            opt.text = rx.name;
+            sel.appendChild(opt);
+        });
+    }
+
+    _selectReceiver(id) {
+        this.selectedReceiverId = id;
+        const rx = this.receivers.get(id);
+        const rxX = document.getElementById('rx-x');
+        const rxY = document.getElementById('rx-y');
+
+        if (rx) {
+            if (rxX) rxX.value = rx.x;
+            if (rxY) rxY.value = rx.y;
+            const nameLabel = document.getElementById('info-rx-name');
+            if (nameLabel) nameLabel.innerText = rx.name;
+        }
+    }
+
+    _removeReceiver() {
         if (this.receivers.size <= 1) return;
-
         this.receivers.delete(this.selectedReceiverId);
-        this._updateReceiverDropdown();
-
-        const firstKey = this.receivers.keys().next().value;
-        this._selectReceiver(firstKey);
+        this._refreshRxDropdown();
+        const nextRx = this.receivers.keys().next().value;
+        this._selectReceiver(nextRx);
     }
 
-    /**
-     * Update the info panel
-     * @private
-     */
-    _updateInfoPanel() {
-        const array = this.context.getArray(this.selectedArrayId);
-        if (!array) return;
+    _animate() {
+        requestAnimationFrame(() => this._animate());
 
-        document.getElementById('info-array-name').textContent = array.name;
-        document.getElementById('info-type').textContent = array.geometry === 'linear' ? 'Linear' : 'Curved';
-        document.getElementById('info-transmitters').textContent = array.numElements;
+        const now = performance.now();
+        const dt = (now - this.lastTime) / 1000;
+        this.lastTime = now;
 
-        // Pitch is directly in wavelength units now
-        document.getElementById('info-spacing').textContent = array.pitch.toFixed(1) + 'λ';
+        // 1. APPLY SMOOTHING
+        this._smoothUpdate();
 
-        const freqNorm = (array.frequency / 40000).toFixed(1);
-        document.getElementById('info-frequency').textContent = freqNorm + 'Hz';
-
-        document.getElementById('info-position').textContent =
-            `${array.position.x.toFixed(0)}x ${array.position.y.toFixed(0)}y`;
-
-        document.getElementById('info-steering').textContent = array.steeringAngle + '°';
-        document.getElementById('info-wavelength').textContent = '1.0';
-
-        // Update receiver info
-        const receiver = this.receivers.get(this.selectedReceiverId);
-        if (receiver) {
-            document.getElementById('info-receiver-name').textContent = receiver.name;
-            document.getElementById('info-receiver-pos').textContent =
-                `${receiver.x.toFixed(0)}x ${receiver.y.toFixed(0)}y`;
+        // 2. TIME STEP
+        const chkWaves = document.getElementById('chk-waves');
+        if (!chkWaves || chkWaves.checked) {
+            this.time += dt * this.context.globalSettings.timeScale;
         }
+
+        // 3. RENDER
+        if (this.heatmapRenderer) this.heatmapRenderer.render(this.context, this.time);
+        if (this.beamPatternRenderer) this.beamPatternRenderer.render(this.context, this.selectedArrayId);
+        if (this.arrayVisRenderer) this.arrayVisRenderer.render(this.context, this.receivers, this.selectedReceiverId);
+
+        this._renderOverlay();
+        this._updateStats();
+        this._updateInfoPanel(this.context.getArray(this.selectedArrayId));
     }
 
-    /**
-     * Update statistics display
-     * @private
-     */
-    _updateStats() {
-        const elementCountEl = document.getElementById('element-count');
-        if (elementCountEl) {
-            elementCountEl.textContent = this.context.getTotalElementCount();
-        }
-    }
-
-    /**
-     * Render the overlay (elements, receivers, axes)
-     * @private
-     */
     _renderOverlay() {
         if (!this.overlayCtx || !this.overlayCanvas) return;
 
+        const cvs = this.overlayCanvas;
         const ctx = this.overlayCtx;
-        const width = this.overlayCanvas.width;
-        const height = this.overlayCanvas.height;
-        const settings = this.context.globalSettings;
 
-        ctx.clearRect(0, 0, width, height);
-
-        // Transform functions
-        const toCanvasX = (x) => {
-            const normalizedX = (x - settings.fieldCenterX) / settings.fieldWidth + 0.5;
-            return normalizedX * width;
-        };
-
-        const toCanvasY = (y) => {
-            const normalizedY = (y - settings.fieldCenterY) / settings.fieldHeight + 0.5;
-            return (1 - normalizedY) * height;
-        };
-
-        // Draw elements if enabled
-        if (this.showElements) {
-            const arrays = this.context.getAllArrays();
-            const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444'];
-
-            arrays.forEach((array, arrayIdx) => {
-                if (!array.enabled) return;
-
-                const elements = array.getElementData();
-                const color = colors[arrayIdx % colors.length];
-
-                elements.forEach(elem => {
-                    const x = toCanvasX(elem.x);
-                    const y = toCanvasY(elem.y);
-
-                    ctx.beginPath();
-                    ctx.arc(x, y, 4, 0, Math.PI * 2);
-                    ctx.fillStyle = color;
-                    ctx.fill();
-                    ctx.strokeStyle = '#fff';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                });
-            });
+        if (cvs.width !== cvs.parentElement.clientWidth || cvs.height !== cvs.parentElement.clientHeight) {
+            cvs.width = cvs.parentElement.clientWidth;
+            cvs.height = cvs.parentElement.clientHeight;
         }
 
-        // Draw receivers
-        for (const [id, receiver] of this.receivers) {
-            const x = toCanvasX(receiver.x);
-            const y = toCanvasY(receiver.y);
+        ctx.clearRect(0, 0, cvs.width, cvs.height);
 
-            // X marker
-            ctx.strokeStyle = '#ef4444';
-            ctx.lineWidth = 3;
-            const size = 8;
+        const settings = this.context.globalSettings;
+        const aspect = cvs.width / cvs.height;
+        const mapX = (x) => ((x - settings.fieldCenterX) / settings.fieldWidth / aspect + 0.5) * cvs.width;
+        const mapY = (y) => (0.5 - (y - settings.fieldCenterY) / settings.fieldHeight) * cvs.height;
+
+        this.receivers.forEach(rx => {
+            const x = mapX(rx.x);
+            const y = mapY(rx.y);
+
+            ctx.strokeStyle = (rx.id === this.selectedReceiverId) ? '#fff' : 'rgba(255,255,255,0.5)';
+            ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(x - size, y - size);
-            ctx.lineTo(x + size, y + size);
-            ctx.moveTo(x + size, y - size);
-            ctx.lineTo(x - size, y + size);
+            ctx.moveTo(x - 10, y); ctx.lineTo(x + 10, y);
+            ctx.moveTo(x, y - 10); ctx.lineTo(x, y + 10);
             ctx.stroke();
 
-            // Label
-            ctx.fillStyle = '#ef4444';
-            ctx.font = 'bold 11px sans-serif';
-            ctx.fillText(receiver.name, x + 12, y + 4);
+            ctx.fillStyle = '#fff';
+            ctx.font = '10px monospace';
+            ctx.fillText(rx.name, x + 12, y - 12);
+        });
+    }
 
-            // Calculate signal strength at receiver
-            let signalStrength = 0;
-            const arrays = this.context.getAllArrays();
-            for (const array of arrays) {
-                signalStrength += Math.abs(array.calculateFieldAt(receiver.x, receiver.y, this.time));
-            }
+    _updateStats() {
+        const fpsEl = document.getElementById('fps-counter');
+        if (fpsEl) fpsEl.innerText = '60';
+    }
 
-            document.getElementById('info-signal-strength').textContent = signalStrength.toFixed(2);
+    _updateInfoPanel(array) {
+        if (!array) return;
+        const elType = document.getElementById('info-type');
+        if (elType) elType.innerText = array.geometry.toUpperCase();
+
+        const elAp = document.getElementById('info-aperture');
+        if (elAp) elAp.innerText = array.getAperture().toFixed(1) + 'λ';
+
+        const elAng = document.getElementById('info-angle');
+        if (elAng) elAng.innerText = array.steeringAngle.toFixed(1) + '°'; // Show smoothed value
+
+        const elFoc = document.getElementById('info-focus');
+        if (elFoc) elFoc.innerText = (array.focalDistance < 1000) ? array.focalDistance + 'λ' : 'Infinity';
+
+        const rx = this.receivers.get(this.selectedReceiverId);
+        if (rx) {
+            const rxPos = document.getElementById('info-rx-pos');
+            if (rxPos) rxPos.innerText = `${rx.x.toFixed(1)}, ${rx.y.toFixed(1)}`;
+
+            let signal = 0;
+            this.context.getAllArrays().forEach(arr => {
+                if (arr.enabled) signal += arr.calculateFieldAt(rx.x, rx.y, this.time);
+            });
+
+            const db = 20 * Math.log10(Math.abs(signal) + 0.0001);
+            const elSig = document.getElementById('info-signal');
+            if (elSig) elSig.innerText = db.toFixed(1) + ' dB';
         }
     }
 
-    /**
-     * Main animation loop
-     * @private
-     */
-    _animate(currentTime) {
-        requestAnimationFrame(this._animate);
-
-        // Calculate delta time
-        const deltaTime = (currentTime - this.lastFrameTime) / 1000;
-        this.lastFrameTime = currentTime;
-
-        // Update FPS counter
-        this.frameCount++;
-        if (currentTime - this.lastFpsUpdate >= this.fpsUpdateInterval) {
-            this.fps = Math.round(this.frameCount * 1000 / (currentTime - this.lastFpsUpdate));
-            this.frameCount = 0;
-            this.lastFpsUpdate = currentTime;
-
-            const fpsEl = document.getElementById('fps');
-            if (fpsEl) fpsEl.textContent = this.fps;
-
-            this._updateStats();
-        }
-
-        // Update simulation time
-        if (this.animateWaves) {
-            this.time += deltaTime * this.timeScale;
-        }
-
-        // Render heatmap
-        if (this.heatmapRenderer) {
-            this.heatmapRenderer.render(this.context, this.time);
-        }
-
-        // Render overlay
-        this._renderOverlay();
-
-        // Render beam pattern
-        if (this.beamPatternRenderer) {
-            this.beamPatternRenderer.render(this.context, this.selectedArrayId);
-        }
-
-        // Render array visualization
-        if (this.arrayVisRenderer) {
-            this.arrayVisRenderer.render(this.context, this.receivers, this.selectedReceiverId);
-        }
-    }
-
-    /**
-     * Cleanup resources
-     */
-    dispose() {
-        window.removeEventListener('resize', this._onResize);
-        if (this.heatmapRenderer) this.heatmapRenderer.dispose();
+    _onResize() {
+        if (this.heatmapRenderer) this.heatmapRenderer.render(this.context, this.time);
+        if (this.beamPatternRenderer) this.beamPatternRenderer.resize();
+        if (this.arrayVisRenderer) this.arrayVisRenderer.resize();
     }
 }

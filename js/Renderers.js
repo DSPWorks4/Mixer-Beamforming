@@ -1,533 +1,267 @@
-/**
- * Renderers.js - Visualization Renderers for Beamforming Simulator
- * 
- * Contains:
- * - HeatmapRenderer: WebGL-based field intensity visualization
- * - BeamPatternRenderer: Polar plot beam pattern
- * - ArrayVisualizationRenderer: Array elements and receiver visualization
- */
-
-/**
- * HeatmapRenderer - WebGL-accelerated wave field visualization
- * Handles all WebGL setup, shader compilation, and rendering
- */
 export class HeatmapRenderer {
     constructor(canvas) {
         this.canvas = canvas;
-        this.gl = null;
-        this.program = null;
-        this.uniforms = {};
-        this.buffers = {};
-        this.isInitialized = false;
-
-        this._init();
+        this.gl = canvas.getContext('webgl');
+        this._initShaders();
+        this._initBuffers();
     }
 
-    _init() {
-        this.gl = this.canvas.getContext('webgl', {
-            antialias: false,
-            preserveDrawingBuffer: false,
-            powerPreference: 'high-performance'
-        });
-
-        if (!this.gl) {
-            console.error('WebGL not supported');
-            return;
-        }
-
+    _initShaders() {
         const gl = this.gl;
+        if (!gl) return;
+        const vsSrc = document.getElementById('vertex-shader').text;
+        const fsSrc = document.getElementById('fragment-shader').text;
 
-        const vertexShaderSource = document.getElementById('vertex-shader').textContent;
-        const fragmentShaderSource = document.getElementById('fragment-shader').textContent;
-
-        const vertexShader = this._compileShader(gl.VERTEX_SHADER, vertexShaderSource);
-        const fragmentShader = this._compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
-
-        if (!vertexShader || !fragmentShader) {
-            console.error('Shader compilation failed');
-            return;
-        }
+        const vs = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs, vsSrc); gl.compileShader(vs);
+        const fs = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs, fsSrc); gl.compileShader(fs);
 
         this.program = gl.createProgram();
-        gl.attachShader(this.program, vertexShader);
-        gl.attachShader(this.program, fragmentShader);
-        gl.linkProgram(this.program);
-
-        if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
-            console.error('Program link error:', gl.getProgramInfoLog(this.program));
-            return;
-        }
-
-        this._setupUniforms();
-        this._setupBuffers();
-        this.isInitialized = true;
+        gl.attachShader(this.program, vs); gl.attachShader(this.program, fs); gl.linkProgram(this.program);
     }
 
-    _compileShader(type, source) {
+    _initBuffers() {
         const gl = this.gl;
-        const shader = gl.createShader(type);
-        gl.shaderSource(shader, source);
-        gl.compileShader(shader);
-
-        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-            console.error('Shader compile error:', gl.getShaderInfoLog(shader));
-            gl.deleteShader(shader);
-            return null;
-        }
-
-        return shader;
-    }
-
-    _setupUniforms() {
-        const gl = this.gl;
-        const program = this.program;
-
-        this.uniforms = {
-            time: gl.getUniformLocation(program, 'u_time'),
-            resolution: gl.getUniformLocation(program, 'u_resolution'),
-            fieldSize: gl.getUniformLocation(program, 'u_fieldSize'),
-            fieldCenter: gl.getUniformLocation(program, 'u_fieldCenter'),
-            elementCount: gl.getUniformLocation(program, 'u_elementCount'),
-            frequency: gl.getUniformLocation(program, 'u_frequency'),
-            wavelength: gl.getUniformLocation(program, 'u_wavelength'),
-            speedOfSound: gl.getUniformLocation(program, 'u_speedOfSound'),
-            displayMode: gl.getUniformLocation(program, 'u_displayMode'),
-            dynamicRange: gl.getUniformLocation(program, 'u_dynamicRange'),
-            elementPositions: []
-        };
-
-        for (let i = 0; i < 64; i++) {
-            this.uniforms.elementPositions.push(
-                gl.getUniformLocation(program, `u_elementPositions[${i}]`)
-            );
-        }
-    }
-
-    _setupBuffers() {
-        const gl = this.gl;
-
-        const vertices = new Float32Array([
-            -1, -1,
-            1, -1,
-            -1, 1,
-            1, 1
-        ]);
-
-        this.buffers.vertices = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.buffers.vertices);
-        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-
-        const positionLocation = gl.getAttribLocation(this.program, 'a_position');
-        gl.enableVertexAttribArray(positionLocation);
-        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
-    }
-
-    resize() {
-        const canvas = this.canvas;
-        const dpr = window.devicePixelRatio || 1;
-        const displayWidth = Math.floor(canvas.clientWidth * dpr);
-        const displayHeight = Math.floor(canvas.clientHeight * dpr);
-
-        if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-            canvas.width = displayWidth;
-            canvas.height = displayHeight;
-
-            if (this.gl) {
-                this.gl.viewport(0, 0, displayWidth, displayHeight);
-            }
-        }
+        if (!gl) return;
+        const buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+        const loc = gl.getAttribLocation(this.program, "a_position");
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     }
 
     render(context, time) {
-        if (!this.isInitialized) return;
-
         const gl = this.gl;
-        const settings = context.globalSettings;
+        if (!gl || !this.program) return;
+        const cvs = this.canvas;
+
+        // Ensure accurate resize
+        if (cvs.width !== cvs.clientWidth || cvs.height !== cvs.clientHeight) {
+            cvs.width = cvs.clientWidth;
+            cvs.height = cvs.clientHeight;
+            gl.viewport(0, 0, cvs.width, cvs.height);
+        }
 
         gl.useProgram(this.program);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.buffers.vertices);
-        const positionLocation = gl.getAttribLocation(this.program, 'a_position');
-        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+        const allElements = [];
+        let totalCount = 0;
+        let avgFreq = 1.0;
 
-        gl.uniform1f(this.uniforms.time, time);
-        gl.uniform2f(this.uniforms.resolution, this.canvas.width, this.canvas.height);
-        gl.uniform2f(this.uniforms.fieldSize, settings.fieldWidth, settings.fieldHeight);
-        gl.uniform2f(this.uniforms.fieldCenter, settings.fieldCenterX, settings.fieldCenterY);
-        gl.uniform1f(this.uniforms.displayMode, settings.displayMode);
-        gl.uniform1f(this.uniforms.dynamicRange, settings.dynamicRange);
-        gl.uniform1f(this.uniforms.speedOfSound, settings.speedOfSound);
-
-        const elements = context.getAllElementData();
-        const elementCount = Math.min(elements.length, 64);
-
-        gl.uniform1i(this.uniforms.elementCount, elementCount);
-
-        let avgFrequency = 40000;
-        const arrays = context.getAllArrays();
-        if (arrays.length > 0) {
-            avgFrequency = arrays.reduce((sum, arr) => sum + arr.frequency, 0) / arrays.length;
-        }
-        const wavelength = settings.speedOfSound / avgFrequency;
-
-        gl.uniform1f(this.uniforms.frequency, avgFrequency);
-        gl.uniform1f(this.uniforms.wavelength, wavelength);
-
-        for (let i = 0; i < 64; i++) {
-            if (i < elementCount) {
-                const elem = elements[i];
-                gl.uniform4f(
-                    this.uniforms.elementPositions[i],
-                    elem.x,
-                    elem.y,
-                    elem.phase,
-                    elem.amplitude
-                );
-            } else {
-                gl.uniform4f(this.uniforms.elementPositions[i], 0, 0, 0, 0);
+        context.getAllArrays().forEach(arr => {
+            if (arr.enabled) {
+                const elements = arr.getElementData();
+                elements.forEach(el => {
+                    allElements.push(el.x, el.y, el.phase, el.amplitude);
+                });
+                avgFreq = arr.frequency;
             }
+        });
+        totalCount = allElements.length / 4;
+
+        // --- SYNC FIX ---
+        // Force visual wavelength to 1.0 unit. 
+        // This assumes the physics engine is normalized such that positions/pitch are in wavelengths.
+        // If pitch is 0.5 (meaning 0.5λ), then wavelength must be 1.0 for the math to hold visually.
+        const wavelength = 1.0;
+
+        const u = (name) => gl.getUniformLocation(this.program, name);
+        gl.uniform1f(u("u_time"), time);
+        gl.uniform2f(u("u_resolution"), cvs.width, cvs.height);
+        gl.uniform2f(u("u_fieldSize"), context.globalSettings.fieldWidth, context.globalSettings.fieldHeight);
+        gl.uniform2f(u("u_fieldCenter"), context.globalSettings.fieldCenterX, context.globalSettings.fieldCenterY);
+        gl.uniform1i(u("u_elementCount"), totalCount);
+
+        // Use normalized frequency for animation speed, but spatial k uses wavelength=1.0
+        gl.uniform1f(u("u_frequency"), 1.0);
+        gl.uniform1f(u("u_wavelength"), wavelength);
+
+        if (totalCount > 0) {
+            if (allElements.length > 256) allElements.length = 256;
+            const data = new Float32Array(256);
+            data.set(allElements);
+            gl.uniform4fv(u("u_elementPositions[0]"), data);
         }
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
-    dispose() {
-        if (this.gl && this.program) {
-            this.gl.deleteProgram(this.program);
-        }
-    }
+    resize() { }
 }
 
 
-/**
- * BeamPatternRenderer - Polar plot beam pattern visualization
- */
 export class BeamPatternRenderer {
     constructor(canvas) {
         this.canvas = canvas;
-        this.ctx = canvas?.getContext('2d');
-        this.numAngles = 360;
+        this.ctx = canvas.getContext('2d');
     }
 
     resize() {
-        if (!this.canvas) return;
-
-        const dpr = window.devicePixelRatio || 1;
-        const displayWidth = Math.floor(this.canvas.clientWidth * dpr);
-        const displayHeight = Math.floor(this.canvas.clientHeight * dpr);
-
-        if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
-            this.canvas.width = displayWidth;
-            this.canvas.height = displayHeight;
+        if (this.canvas.width !== this.canvas.parentElement.clientWidth) {
+            this.canvas.width = this.canvas.parentElement.clientWidth;
+            this.canvas.height = this.canvas.parentElement.clientHeight;
         }
     }
 
     render(context, selectedArrayId) {
-        if (!this.ctx) return;
+        this.resize();
 
         const ctx = this.ctx;
-        const width = this.canvas.width;
-        const height = this.canvas.height;
+        const w = this.canvas.width;
+        const h = this.canvas.height;
 
-        // Clear
-        ctx.fillStyle = '#12122a';
-        ctx.fillRect(0, 0, width, height);
+        // --- TRUNCATION FIX ---
+        // Calculate radius to fit EITHER width or height, with padding
+        const padding = 25; // Space for labels
+        const availH = h - padding;
+        const availW = w / 2 - padding; // Since it's a semi-circle, we need w/2
+        const radius = Math.min(availW, availH);
 
-        const centerX = width / 2;
-        const centerY = height * 0.95;
-        const maxRadius = Math.min(width, height) * 0.85;
+        const cx = w / 2;
+        const cy = h - 15; // Bottom anchor
 
-        // Draw polar grid
-        ctx.strokeStyle = 'rgba(99, 102, 241, 0.2)';
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.strokeStyle = "#333";
         ctx.lineWidth = 1;
 
-        // Concentric circles (dB levels)
-        const dbLevels = [0, -5, -10, -15, -20, -25, -30];
-        dbLevels.forEach(db => {
-            const radius = maxRadius * (1 + db / 30);
-            if (radius > 0) {
-                ctx.beginPath();
-                ctx.arc(centerX, centerY, radius, Math.PI, 2 * Math.PI);
-                ctx.stroke();
-            }
-        });
-
-        // Radial lines (angles)
-        const angleLines = [-90, -60, -30, 0, 30, 60, 90];
-        ctx.fillStyle = '#888';
-        ctx.font = '11px sans-serif';
-        ctx.textAlign = 'center';
-
-        angleLines.forEach(angle => {
-            const rad = (angle - 90) * Math.PI / 180;
-            const x1 = centerX;
-            const y1 = centerY;
-            const x2 = centerX + maxRadius * Math.cos(rad);
-            const y2 = centerY + maxRadius * Math.sin(rad);
-
+        for (let r = 0.2; r <= 1.0; r += 0.2) {
             ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
+            ctx.arc(cx, cy, radius * r, Math.PI, 0);
             ctx.stroke();
-
-            // Angle labels
-            const labelRadius = maxRadius + 15;
-            const lx = centerX + labelRadius * Math.cos(rad);
-            const ly = centerY + labelRadius * Math.sin(rad);
-            ctx.fillText(angle + '°', lx, ly + 4);
-        });
-
-        // Calculate beam pattern
-        const arrays = context.getAllArrays();
-        if (arrays.length === 0) return;
-
-        // Use all arrays combined or selected array
-        const beamData = [];
-
-        for (let i = 0; i <= 180; i++) {
-            const angle = i - 90; // -90 to 90
-            let totalIntensity = 0;
-
-            for (const array of arrays) {
-                if (!array.enabled) continue;
-                totalIntensity += array.calculateBeamPattern(angle);
-            }
-
-            beamData.push({
-                angle: angle,
-                intensity: totalIntensity
-            });
         }
 
-        // Normalize
-        const maxIntensity = Math.max(...beamData.map(d => d.intensity));
+        ctx.fillStyle = "#666";
+        ctx.textAlign = "center";
+        ctx.font = "10px monospace";
 
-        // Draw beam pattern
-        ctx.beginPath();
-        ctx.strokeStyle = '#f97316';
+        // Draw Angles: -90° on left, 0° at center (top), +90° on right
+        // Canvas angle 180° (left) = -90° steering
+        // Canvas angle 90° (up/center) = 0° steering  
+        // Canvas angle 0° (right) = +90° steering
+        for (let steerAngle = -90; steerAngle <= 90; steerAngle += 30) {
+            // Convert steering angle to canvas angle
+            // steerAngle -90 -> canvas 180° (left)
+            // steerAngle 0 -> canvas 90° (up)
+            // steerAngle +90 -> canvas 0° (right)
+            const canvasAngle = (90 - steerAngle) * (Math.PI / 180);
+
+            const x = cx + radius * Math.cos(canvasAngle);
+            const y = cy - radius * Math.sin(canvasAngle);
+
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+
+            const lx = cx + (radius + 15) * Math.cos(canvasAngle);
+            const ly = cy - (radius + 15) * Math.sin(canvasAngle);
+            ctx.fillText(steerAngle + "°", lx, ly);
+        }
+
+        const array = context.getArray(selectedArrayId);
+        if (!array) return;
+
+        ctx.strokeStyle = "#facc15";
         ctx.lineWidth = 2;
+        ctx.beginPath();
 
-        beamData.forEach((d, i) => {
-            const normalizedDb = maxIntensity > 0
-                ? 10 * Math.log10(d.intensity / maxIntensity + 1e-10)
-                : -30;
+        // Plot beam pattern from -90° to +90° steering angle
+        for (let steerAngle = -90; steerAngle <= 90; steerAngle++) {
+            // Calculate beam intensity at this steering angle
+            const intensity = array.calculateBeamPattern(steerAngle);
 
-            const radius = maxRadius * Math.max(0, (1 + normalizedDb / 30));
-            const rad = (d.angle - 90) * Math.PI / 180;
-            const x = centerX + radius * Math.cos(rad);
-            const y = centerY + radius * Math.sin(rad);
+            const db = 10 * Math.log10(intensity + 0.00001);
+            const minDb = -40;
+            let norm = (db - minDb) / (0 - minDb);
+            if (norm < 0) norm = 0;
 
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
-        });
+            const r = norm * radius;
 
+            // Convert steering angle to canvas coordinates
+            const canvasAngle = (90 - steerAngle) * (Math.PI / 180);
+            const px = cx + r * Math.cos(canvasAngle);
+            const py = cy - r * Math.sin(canvasAngle);
+
+            if (steerAngle === -90) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
         ctx.stroke();
 
-        // Fill with gradient
-        ctx.globalAlpha = 0.3;
-        ctx.fillStyle = '#f97316';
-        ctx.lineTo(centerX, centerY);
+        ctx.fillStyle = "rgba(250, 204, 21, 0.2)";
+        ctx.lineTo(cx, cy);
         ctx.closePath();
         ctx.fill();
-        ctx.globalAlpha = 1;
     }
 }
 
-
-/**
- * ArrayVisualizationRenderer - Shows array elements and receivers in 2D space
- */
 export class ArrayVisualizationRenderer {
     constructor(canvas) {
         this.canvas = canvas;
-        this.ctx = canvas?.getContext('2d');
+        this.ctx = canvas.getContext('2d');
     }
 
     resize() {
-        if (!this.canvas) return;
-
-        const dpr = window.devicePixelRatio || 1;
-        const displayWidth = Math.floor(this.canvas.clientWidth * dpr);
-        const displayHeight = Math.floor(this.canvas.clientHeight * dpr);
-
-        if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
-            this.canvas.width = displayWidth;
-            this.canvas.height = displayHeight;
+        if (this.canvas.width !== this.canvas.parentElement.clientWidth) {
+            this.canvas.width = this.canvas.parentElement.clientWidth;
+            this.canvas.height = this.canvas.parentElement.clientHeight;
         }
     }
 
-    render(context, receivers, selectedReceiverId) {
-        if (!this.ctx) return;
+    render(context, receivers, selectedRxId) {
+        this.resize();
 
         const ctx = this.ctx;
-        const width = this.canvas.width;
-        const height = this.canvas.height;
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        ctx.fillStyle = "#0a0a12";
+        ctx.fillRect(0, 0, w, h);
 
-        // Clear
-        ctx.fillStyle = '#12122a';
-        ctx.fillRect(0, 0, width, height);
+        const showElements = document.getElementById('chk-elements');
+        if (showElements && !showElements.checked) return;
 
-        const margin = 40;
-        const plotWidth = width - margin * 2;
-        const plotHeight = height - margin * 2;
+        // --- PADDING FIX ---
+        // Add 20% padding to field size so elements at the edge aren't cut off
+        const paddingFactor = 1.2;
+        const scaleX = w / (context.globalSettings.fieldWidth * paddingFactor);
+        const scaleY = h / (context.globalSettings.fieldHeight * paddingFactor);
+        const aspect = w / h;
 
-        // Calculate bounds
-        let minX = -3, maxX = 3, minY = -0.5, maxY = 5;
+        const toScreen = (x, y) => {
+            const normX = (x - context.globalSettings.fieldCenterX) / context.globalSettings.fieldWidth;
+            const normY = (y - context.globalSettings.fieldCenterY) / context.globalSettings.fieldHeight;
+            // Apply padding factor to normalization
+            const screenX = (normX / paddingFactor / aspect + 0.5) * w;
+            const screenY = (0.5 - normY / paddingFactor) * h;
+            return { x: screenX, y: screenY };
+        };
 
-        // Adjust bounds based on elements and receivers
-        const arrays = context.getAllArrays();
-        for (const array of arrays) {
-            const elements = array.getElementData();
-            for (const elem of elements) {
-                minX = Math.min(minX, elem.x - 0.5);
-                maxX = Math.max(maxX, elem.x + 0.5);
-                minY = Math.min(minY, elem.y - 0.5);
-                maxY = Math.max(maxY, elem.y + 0.5);
-            }
-        }
-
-        for (const [id, receiver] of receivers) {
-            minX = Math.min(minX, receiver.x - 0.5);
-            maxX = Math.max(maxX, receiver.x + 0.5);
-            minY = Math.min(minY, receiver.y - 0.5);
-            maxY = Math.max(maxY, receiver.y + 0.5);
-        }
-
-        // Transform functions
-        const toCanvasX = (x) => margin + ((x - minX) / (maxX - minX)) * plotWidth;
-        const toCanvasY = (y) => height - margin - ((y - minY) / (maxY - minY)) * plotHeight;
-
-        // Draw grid
-        ctx.strokeStyle = 'rgba(99, 102, 241, 0.15)';
-        ctx.lineWidth = 1;
-
-        const gridStepX = 1;
-        const gridStepY = 1;
-
-        for (let x = Math.ceil(minX); x <= maxX; x += gridStepX) {
-            const px = toCanvasX(x);
-            ctx.beginPath();
-            ctx.moveTo(px, margin);
-            ctx.lineTo(px, height - margin);
-            ctx.stroke();
-        }
-
-        for (let y = Math.ceil(minY); y <= maxY; y += gridStepY) {
-            const py = toCanvasY(y);
-            ctx.beginPath();
-            ctx.moveTo(margin, py);
-            ctx.lineTo(width - margin, py);
-            ctx.stroke();
-        }
-
-        // Draw axes
-        ctx.strokeStyle = '#4a4a8a';
-        ctx.lineWidth = 1;
-
-        // X axis
-        const y0 = toCanvasY(0);
-        if (y0 >= margin && y0 <= height - margin) {
-            ctx.beginPath();
-            ctx.moveTo(margin, y0);
-            ctx.lineTo(width - margin, y0);
-            ctx.stroke();
-        }
-
-        // Y axis
-        const x0 = toCanvasX(0);
-        if (x0 >= margin && x0 <= width - margin) {
-            ctx.beginPath();
-            ctx.moveTo(x0, margin);
-            ctx.lineTo(x0, height - margin);
-            ctx.stroke();
-        }
-
-        // Axis labels
-        ctx.fillStyle = '#888';
-        ctx.font = '10px sans-serif';
-        ctx.textAlign = 'center';
-
-        for (let x = Math.ceil(minX); x <= maxX; x += gridStepX) {
-            const px = toCanvasX(x);
-            ctx.fillText(x.toString(), px, height - margin + 15);
-        }
-
-        ctx.textAlign = 'right';
-        for (let y = Math.ceil(minY); y <= maxY; y += gridStepY) {
-            const py = toCanvasY(y);
-            ctx.fillText(y.toString(), margin - 8, py + 4);
-        }
-
-        // Draw array elements
-        const colors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899'];
-
-        arrays.forEach((array, arrayIdx) => {
-            if (!array.enabled) return;
-
-            const elements = array.getElementData();
-            const color = colors[arrayIdx % colors.length];
-
-            elements.forEach(elem => {
-                const x = toCanvasX(elem.x);
-                const y = toCanvasY(elem.y);
-
-                // Draw element
+        // Draw Elements
+        context.getAllArrays().forEach(arr => {
+            ctx.fillStyle = "#6366f1";
+            const elements = arr.getElementData();
+            elements.forEach(el => {
+                const p = toScreen(el.x, el.y);
                 ctx.beginPath();
-                ctx.arc(x, y, 6, 0, Math.PI * 2);
-                ctx.fillStyle = color;
+                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-
-                // Draw phase indicator (small line showing direction)
-                const phaseAngle = elem.phase;
-                const lineLen = 10;
-                ctx.beginPath();
-                ctx.moveTo(x, y);
-                ctx.lineTo(
-                    x + Math.sin(phaseAngle) * lineLen,
-                    y - Math.cos(phaseAngle) * lineLen
-                );
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.stroke();
             });
         });
 
-        // Draw receivers
-        for (const [id, receiver] of receivers) {
-            const x = toCanvasX(receiver.x);
-            const y = toCanvasY(receiver.y);
-
-            // X marker
-            ctx.strokeStyle = '#ef4444';
-            ctx.lineWidth = 3;
-            const size = 10;
+        // Draw Receivers
+        receivers.forEach(rx => {
+            const p = toScreen(rx.x, rx.y);
+            const isSel = rx.id === selectedRxId;
+            ctx.strokeStyle = isSel ? "#fff" : "#ef4444";
+            ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(x - size, y - size);
-            ctx.lineTo(x + size, y + size);
-            ctx.moveTo(x + size, y - size);
-            ctx.lineTo(x - size, y + size);
+            ctx.moveTo(p.x - 4, p.y - 4); ctx.lineTo(p.x + 4, p.y + 4);
+            ctx.moveTo(p.x + 4, p.y - 4); ctx.lineTo(p.x - 4, p.y + 4);
             ctx.stroke();
-
-            // Highlight if selected
-            if (id === selectedReceiverId) {
-                ctx.beginPath();
-                ctx.arc(x, y, 15, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            }
-
-            // Label
-            ctx.fillStyle = '#ef4444';
-            ctx.font = 'bold 11px sans-serif';
-            ctx.textAlign = 'left';
-            ctx.fillText(receiver.name, x + 15, y + 4);
-        }
+            ctx.fillStyle = "#ef4444";
+            ctx.font = "10px sans-serif";
+            ctx.fillText(rx.name, p.x + 6, p.y);
+        });
     }
 }
