@@ -1,3 +1,15 @@
+/**
+ * Renderers.js - Visualization Renderers for Beamforming Simulator
+ * * Contains:
+ * - HeatmapRenderer: WebGL-based field intensity visualization
+ * - BeamPatternRenderer: Polar plot beam pattern
+ * - ArrayVisualizationRenderer: Array elements and receiver visualization
+ */
+
+/**
+ * HeatmapRenderer - WebGL-accelerated wave field visualization
+ * Handles all WebGL setup, shader compilation, and rendering
+ */
 export class HeatmapRenderer {
     constructor(canvas) {
         this.canvas = canvas;
@@ -48,22 +60,29 @@ export class HeatmapRenderer {
         let totalCount = 0;
         let avgFreq = 1.0;
 
+        // Determine average frequency from active arrays
+        const activeArrays = context.getAllArrays().filter(arr => arr.enabled);
+        if (activeArrays.length > 0) {
+            avgFreq = activeArrays[0].frequency;
+        }
+
         context.getAllArrays().forEach(arr => {
             if (arr.enabled) {
                 const elements = arr.getElementData();
                 elements.forEach(el => {
                     allElements.push(el.x, el.y, el.phase, el.amplitude);
                 });
-                avgFreq = arr.frequency;
             }
         });
         totalCount = allElements.length / 4;
 
-        // --- SYNC FIX ---
-        // Force visual wavelength to 1.0 unit. 
-        // This assumes the physics engine is normalized such that positions/pitch are in wavelengths.
-        // If pitch is 0.5 (meaning 0.5λ), then wavelength must be 1.0 for the math to hold visually.
-        const wavelength = 1.0;
+        // --- DYNAMIC WAVELENGTH CALCULATION ---
+        // Use the global speed of sound (normalized to 1.0) and current frequency
+        // to calculate the physical wavelength for the shader.
+        // This ensures the visual wave pattern matches the interference physics (Beam Pattern).
+        const speedOfSound = context.globalSettings.speedOfSound;
+        const safeFreq = Math.max(0.1, avgFreq); // Prevent division by zero
+        const wavelength = speedOfSound / safeFreq;
 
         const u = (name) => gl.getUniformLocation(this.program, name);
         gl.uniform1f(u("u_time"), time);
@@ -72,8 +91,8 @@ export class HeatmapRenderer {
         gl.uniform2f(u("u_fieldCenter"), context.globalSettings.fieldCenterX, context.globalSettings.fieldCenterY);
         gl.uniform1i(u("u_elementCount"), totalCount);
 
-        // Use normalized frequency for animation speed, but spatial k uses wavelength=1.0
-        gl.uniform1f(u("u_frequency"), 1.0);
+        // Pass actual frequency and wavelength to shader
+        gl.uniform1f(u("u_frequency"), safeFreq);
         gl.uniform1f(u("u_wavelength"), wavelength);
 
         if (totalCount > 0) {
@@ -110,15 +129,14 @@ export class BeamPatternRenderer {
         const w = this.canvas.width;
         const h = this.canvas.height;
 
-        // --- TRUNCATION FIX ---
         // Calculate radius to fit EITHER width or height, with padding
-        const padding = 25; // Space for labels
+        const padding = 25;
         const availH = h - padding;
-        const availW = w / 2 - padding; // Since it's a semi-circle, we need w/2
+        const availW = w / 2 - padding;
         const radius = Math.min(availW, availH);
 
         const cx = w / 2;
-        const cy = h - 15; // Bottom anchor
+        const cy = h - 15;
 
         ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, w, h);
@@ -136,15 +154,8 @@ export class BeamPatternRenderer {
         ctx.textAlign = "center";
         ctx.font = "10px monospace";
 
-        // Draw Angles: -90° on left, 0° at center (top), +90° on right
-        // Canvas angle 180° (left) = -90° steering
-        // Canvas angle 90° (up/center) = 0° steering  
-        // Canvas angle 0° (right) = +90° steering
+        // Draw Angles
         for (let steerAngle = -90; steerAngle <= 90; steerAngle += 30) {
-            // Convert steering angle to canvas angle
-            // steerAngle -90 -> canvas 180° (left)
-            // steerAngle 0 -> canvas 90° (up)
-            // steerAngle +90 -> canvas 0° (right)
             const canvasAngle = (90 - steerAngle) * (Math.PI / 180);
 
             const x = cx + radius * Math.cos(canvasAngle);
@@ -167,9 +178,7 @@ export class BeamPatternRenderer {
         ctx.lineWidth = 2;
         ctx.beginPath();
 
-        // Plot beam pattern from -90° to +90° steering angle
         for (let steerAngle = -90; steerAngle <= 90; steerAngle++) {
-            // Calculate beam intensity at this steering angle
             const intensity = array.calculateBeamPattern(steerAngle);
 
             const db = 10 * Math.log10(intensity + 0.00001);
@@ -179,7 +188,6 @@ export class BeamPatternRenderer {
 
             const r = norm * radius;
 
-            // Convert steering angle to canvas coordinates
             const canvasAngle = (90 - steerAngle) * (Math.PI / 180);
             const px = cx + r * Math.cos(canvasAngle);
             const py = cy - r * Math.sin(canvasAngle);
@@ -221,8 +229,6 @@ export class ArrayVisualizationRenderer {
         const showElements = document.getElementById('chk-elements');
         if (showElements && !showElements.checked) return;
 
-        // --- PADDING FIX ---
-        // Add 20% padding to field size so elements at the edge aren't cut off
         const paddingFactor = 1.2;
         const scaleX = w / (context.globalSettings.fieldWidth * paddingFactor);
         const scaleY = h / (context.globalSettings.fieldHeight * paddingFactor);
@@ -231,13 +237,11 @@ export class ArrayVisualizationRenderer {
         const toScreen = (x, y) => {
             const normX = (x - context.globalSettings.fieldCenterX) / context.globalSettings.fieldWidth;
             const normY = (y - context.globalSettings.fieldCenterY) / context.globalSettings.fieldHeight;
-            // Apply padding factor to normalization
             const screenX = (normX / paddingFactor / aspect + 0.5) * w;
             const screenY = (0.5 - normY / paddingFactor) * h;
             return { x: screenX, y: screenY };
         };
 
-        // Draw Elements
         context.getAllArrays().forEach(arr => {
             ctx.fillStyle = "#6366f1";
             const elements = arr.getElementData();
@@ -249,7 +253,6 @@ export class ArrayVisualizationRenderer {
             });
         });
 
-        // Draw Receivers
         receivers.forEach(rx => {
             const p = toScreen(rx.x, rx.y);
             const isSel = rx.id === selectedRxId;

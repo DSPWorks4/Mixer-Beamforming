@@ -1,7 +1,6 @@
 /**
  * PhasedArray.js - Physics Model for Phased Array Systems
- * 
- * This class encapsulates all physics calculations for a phased array:
+ * * This class encapsulates all physics calculations for a phased array:
  * - Element position calculations (linear and curved geometries)
  * - Phase delay calculations for beam steering
  * - Wave propagation parameters
@@ -76,7 +75,8 @@ export class PhasedArray {
 
     get frequency() { return this._frequency; }
     set frequency(value) {
-        this._frequency = Math.max(100, value);
+        // FIX: Allow lower frequencies for normalized unit visualization (e.g. 1.0)
+        this._frequency = Math.max(0.1, value);
         this._dirty = true;
     }
 
@@ -128,7 +128,8 @@ export class PhasedArray {
 
     get speedOfSound() { return this._speedOfSound; }
     set speedOfSound(value) {
-        this._speedOfSound = Math.max(100, value);
+        // FIX: Allow lower speed for normalized unit visualization (e.g. 1.0)
+        this._speedOfSound = Math.max(0.1, value);
         this._dirty = true;
     }
 
