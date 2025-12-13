@@ -1,10 +1,13 @@
 /**
- * Renderers.js - Visualization Renderers for Beamforming Simulator
+ * Renderers.js - Visualization Renderers 
  * * Contains:
  * - HeatmapRenderer: WebGL-based field intensity visualization
  * - BeamPatternRenderer: Polar plot beam pattern
  * - ArrayVisualizationRenderer: Array elements and receiver visualization
  */
+
+import { vertexShaderSource } from './shaders/vertexShader.js';
+import { fragmentShaderSource } from './shaders/fragmentShader.js';
 
 /**
  * HeatmapRenderer - WebGL-accelerated wave field visualization
@@ -21,8 +24,8 @@ export class HeatmapRenderer {
     _initShaders() {
         const gl = this.gl;
         if (!gl) return;
-        const vsSrc = document.getElementById('vertex-shader').text;
-        const fsSrc = document.getElementById('fragment-shader').text;
+        const vsSrc = vertexShaderSource;
+        const fsSrc = fragmentShaderSource;
 
         const vs = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs, vsSrc); gl.compileShader(vs);
         const fs = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs, fsSrc); gl.compileShader(fs);
@@ -78,10 +81,8 @@ export class HeatmapRenderer {
 
         // --- DYNAMIC WAVELENGTH CALCULATION ---
         // Use the global speed of sound (normalized to 1.0) and current frequency
-        // to calculate the physical wavelength for the shader.
-        // This ensures the visual wave pattern matches the interference physics (Beam Pattern).
         const speedOfSound = context.globalSettings.speedOfSound;
-        const safeFreq = Math.max(0.1, avgFreq); // Prevent division by zero
+        const safeFreq = Math.max(0.1, avgFreq);
         const wavelength = speedOfSound / safeFreq;
 
         const u = (name) => gl.getUniformLocation(this.program, name);

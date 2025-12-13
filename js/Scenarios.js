@@ -1,5 +1,5 @@
 /**
- * Scenarios.js - Preset Configurations for Beamforming Simulator
+ * Scenarios.js - Preset Configurations 
  * 
  * All units are in wavelengths for easier visualization
  * - 5G MIMO: Linear array, far-field steering
@@ -32,7 +32,7 @@ export const Scenarios = {
             }
         ],
         globalSettings: {
-            speedOfSound: 343,
+            speedOfSound: 3e8,
             fieldWidth: 40,              // 40 wavelengths
             fieldHeight: 40,             // 40 wavelengths  
             fieldCenterX: 0,
@@ -67,7 +67,7 @@ export const Scenarios = {
             }
         ],
         globalSettings: {
-            speedOfSound: 343,
+            speedOfSound: 1540,
             fieldWidth: 30,
             fieldHeight: 35,
             fieldCenterX: 0,

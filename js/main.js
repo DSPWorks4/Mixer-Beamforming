@@ -1,28 +1,17 @@
-/**
- * main.js - Application Entry Point
- * 
- * This file handles only initialization.
- * All logic is delegated to the AppController.
- */
+// main.js -> Entry Point for beamforming simulation
 
 import { AppController } from './AppController.js';
 
-// Application instance
 let app = null;
 
-/**
- * Initialize the application when DOM is ready
- */
 function init() {
-    console.log('🚀 Initializing Beamforming Simulator...');
+    console.log('Initializing');
 
-    // Create and initialize the application controller
     app = new AppController();
     app.init();
 
-    console.log('✅ Beamforming Simulator initialized successfully');
-    console.log('📖 Use the controls on the right to adjust parameters');
-    console.log('📡 Select different scenarios to see various beamforming applications');
+    console.log('Initialized');
+
 }
 
 // Wait for DOM to be ready

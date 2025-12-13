@@ -1,6 +1,5 @@
 /**
  * PhasedArray.js - Physics Model for Phased Array Systems
- * * This class encapsulates all physics calculations for a phased array:
  * - Element position calculations (linear and curved geometries)
  * - Phase delay calculations for beam steering
  * - Wave propagation parameters
@@ -75,7 +74,6 @@ export class PhasedArray {
 
     get frequency() { return this._frequency; }
     set frequency(value) {
-        // FIX: Allow lower frequencies for normalized unit visualization (e.g. 1.0)
         this._frequency = Math.max(0.1, value);
         this._dirty = true;
     }
@@ -128,7 +126,6 @@ export class PhasedArray {
 
     get speedOfSound() { return this._speedOfSound; }
     set speedOfSound(value) {
-        // FIX: Allow lower speed for normalized unit visualization (e.g. 1.0)
         this._speedOfSound = Math.max(0.1, value);
         this._dirty = true;
     }
@@ -216,7 +213,7 @@ export class PhasedArray {
 
         if (this._geometry === 'linear') {
             // For linear array: phase delay based on steering angle
-            // Delay = (d * sin(θ)) / c, where d is distance from center
+            // Delay = (d * sin(θ)) / c, where d is distance from center and c is speed of sound in the medium
             const totalWidth = (n - 1) * this._pitch;
             const startOffset = -totalWidth / 2;
 
@@ -226,7 +223,7 @@ export class PhasedArray {
 
                 // Steering delay
                 const steeringDelay = localX * Math.sin(steeringRad);
-                phase -= k * steeringDelay;
+                phase -= k * steeringDelay / this._speedOfSound;
 
                 // Focusing delay (if focal distance is finite)
                 if (isFinite(this._focalDistance)) {
