@@ -18,6 +18,14 @@ export class AppController {
         this.time = 0;
         this.lastTime = performance.now();
 
+        // Physics State for UI conversion
+        this.physicsState = {
+            baseFrequency: 40000,
+            speedOfSound: 343,
+            baseWavelength: 343 / 40000,
+            scaleFactor: 1.0 / (343 / 40000)
+        };
+
         // SMOOTHING STATE
         // Stores { target: val, current: val } for properties
         this.targets = new Map();
@@ -102,7 +110,7 @@ export class AppController {
         bindSlider('sld-elem', 'numElements', v => Math.round(v), true);
         bindSlider('sld-pitch', 'pitch', v => v.toFixed(1) + 'λ', true);
         bindSlider('sld-curve', 'curvatureRadius', v => v + 'λ', true);
-        bindSlider('sld-freq', 'frequency', v => v.toFixed(1) + 'x', true);
+        bindSlider('sld-freq', 'frequency', v => this._formatFrequency(v), true);
         bindSlider('sld-steer', 'steeringAngle', v => v + '°', true);
 
         // Geometry Radios (Immediate)
@@ -224,6 +232,16 @@ export class AppController {
         }
     }
 
+    _formatFrequency(val) {
+        if (!this.physicsState) return val.toFixed(1) + 'x';
+        const realHz = val * this.physicsState.baseFrequency;
+
+        if (realHz >= 1e9) return (realHz / 1e9).toFixed(2) + ' GHz';
+        if (realHz >= 1e6) return (realHz / 1e6).toFixed(2) + ' MHz';
+        if (realHz >= 1e3) return (realHz / 1e3).toFixed(2) + ' kHz';
+        return Math.round(realHz) + ' Hz';
+    }
+
     _updateArrayFromInputs() {
         const array = this.context.getArray(this.selectedArrayId);
         if (!array) return;
@@ -253,20 +271,75 @@ export class AppController {
         this.context.clearArrays();
         this.targets.clear(); // Clear smoothing targets
 
-        if (scenario.globalSettings) {
-            this.context.globalSettings = { ...this.context.globalSettings, ...scenario.globalSettings };
-            // FORCE NORMALIZED SPEED
-            this.context.globalSettings.speedOfSound = 1.0;
+        // 1. Determine Physics Basis
+        // We need a base frequency and speed of sound to define "1.0" (1 wavelength)
+        // Default to 40kHz / 343m/s if not specified
+        let baseFreq = 40000;
+        let speedOfSound = 343;
+
+        if (scenario.globalSettings && scenario.globalSettings.speedOfSound) {
+            speedOfSound = scenario.globalSettings.speedOfSound;
         }
 
+        // Find the first array's frequency to use as base
+        if (scenario.arrays && scenario.arrays.length > 0) {
+            baseFreq = scenario.arrays[0].frequency;
+        }
+
+        const baseWavelength = speedOfSound / baseFreq;
+        const scaleFactor = 1.0 / baseWavelength; // Convert Meters -> Wavelengths
+
+        this.physicsState = {
+            baseFrequency: baseFreq,
+            speedOfSound: speedOfSound,
+            baseWavelength: baseWavelength,
+            scaleFactor: scaleFactor
+        };
+
+        // 2. Configure Global Settings (Normalized)
+        this.context.globalSettings = {
+            ...this.context.globalSettings,
+            speedOfSound: 1.0, // Normalized c=1
+            timeScale: 1.0
+        };
+
+        if (scenario.globalSettings) {
+            if (scenario.globalSettings.fieldWidth)
+                this.context.globalSettings.fieldWidth = scenario.globalSettings.fieldWidth * scaleFactor;
+            if (scenario.globalSettings.fieldHeight)
+                this.context.globalSettings.fieldHeight = scenario.globalSettings.fieldHeight * scaleFactor;
+            if (scenario.globalSettings.fieldCenterX !== undefined)
+                this.context.globalSettings.fieldCenterX = scenario.globalSettings.fieldCenterX * scaleFactor;
+            if (scenario.globalSettings.fieldCenterY !== undefined)
+                this.context.globalSettings.fieldCenterY = scenario.globalSettings.fieldCenterY * scaleFactor;
+        }
+
+        // 3. Configure Arrays (Normalized)
         if (scenario.arrays) {
             scenario.arrays.forEach(conf => {
-                // Ensure array config matches normalized physics
-                conf.speedOfSound = 1.0;
-                // Scenario file might have 40000 Hz, map to 1.0
-                if (conf.frequency > 100) conf.frequency = 1.0;
+                // Clone config to avoid mutating the original scenario
+                const normConf = { ...conf };
 
-                const arr = new PhasedArray(conf);
+                // Normalize Spatial Properties
+                if (normConf.pitch) normConf.pitch *= scaleFactor;
+                if (normConf.position) {
+                    normConf.position = {
+                        x: normConf.position.x * scaleFactor,
+                        y: normConf.position.y * scaleFactor
+                    };
+                }
+                if (normConf.curvatureRadius) normConf.curvatureRadius *= scaleFactor;
+                if (normConf.focalDistance && normConf.focalDistance !== Infinity) {
+                    normConf.focalDistance *= scaleFactor;
+                }
+
+                // Normalize Frequency/Speed
+                // If the array freq matches base, it becomes 1.0
+                // If it's different (e.g. 2x base), it becomes 2.0
+                normConf.frequency = conf.frequency / baseFreq;
+                normConf.speedOfSound = 1.0;
+
+                const arr = new PhasedArray(normConf);
                 this.context.addArray(arr);
             });
         }
