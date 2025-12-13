@@ -70,12 +70,6 @@
                                 class="control-value">1.0x</span></div>
                         <input type="range" id="sld-freq" min="0.5" max="3.0" step="0.1">
                     </div>
-
-                    <div class="control-label" style="margin-top: 10px;">Position (X / Y)</div>
-                    <div class="btn-row">
-                        <input type="number" id="pos-x" step="0.5" placeholder="X">
-                        <input type="number" id="pos-y" step="0.5" placeholder="Y">
-                    </div>
                 </div>
             </div>
 
@@ -85,10 +79,6 @@
                 <div class="btn-row">
                     <button id="add-receiver" class="btn btn-success">+ New</button>
                     <button id="remove-receiver" class="btn btn-danger">Delete</button>
-                </div>
-                <div class="btn-row" style="margin-top: 10px;">
-                    <input type="number" id="rx-x" step="0.5" placeholder="X">
-                    <input type="number" id="rx-y" step="0.5" placeholder="Y">
                 </div>
             </div>
         </div>
@@ -103,8 +93,7 @@
                     <span>Real-Time</span>
                 </div>
                 <canvas id="heatmap-canvas" class="fullscreen"></canvas>
-                <canvas id="overlay-canvas"
-                    style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
+                <canvas id="overlay-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%;"></canvas>
 
                 <div class="overlay-legend">
                     <span class="legend-label">+</span>

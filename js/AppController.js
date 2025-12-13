@@ -129,11 +129,14 @@ export class AppController {
             });
         });
 
-        // Text Inputs (Name, Position)
-        ['pos-x', 'pos-y', 'array-name'].forEach(id => {
+        // Text Inputs (Name)
+        ['array-name'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', () => this._updateArrayFromInputs());
         });
+
+        // --- Interaction (Drag & Drop) ---
+        this._bindInteractionEvents();
 
         // --- Receiver Management ---
         const addRxBtn = document.getElementById('add-receiver');
@@ -151,18 +154,7 @@ export class AppController {
         }
 
         // Receiver Position Inputs
-        ['rx-x', 'rx-y'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-                el.addEventListener('input', () => {
-                    const rx = this.receivers.get(this.selectedReceiverId);
-                    if (rx) {
-                        rx.x = parseFloat(document.getElementById('rx-x').value) || 0;
-                        rx.y = parseFloat(document.getElementById('rx-y').value) || 0;
-                    }
-                });
-            }
-        });
+        // Removed as per request
 
         const speedSld = document.getElementById('sld-speed');
         if (speedSld) {
@@ -172,6 +164,84 @@ export class AppController {
         }
 
         window.addEventListener('resize', () => this._onResize());
+    }
+
+    _bindInteractionEvents() {
+        const canvas = document.getElementById('overlay-canvas');
+        if (!canvas) return;
+
+        let isDragging = false;
+        let dragTarget = null; // { type: 'array'|'receiver', id: string }
+
+        const getMousePos = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+        };
+
+        const screenToPhysics = (sx, sy) => {
+            const rect = canvas.getBoundingClientRect();
+            const settings = this.context.globalSettings;
+            const aspect = rect.width / rect.height;
+
+            // Inverse of mapX/mapY
+            // mapX = ((x - cx) / w / aspect + 0.5) * cw
+            // x = ((sx / cw - 0.5) * aspect * w) + cx
+
+            const x = ((sx / rect.width - 0.5) * aspect * settings.fieldWidth) + settings.fieldCenterX;
+            const y = settings.fieldCenterY - ((sy / rect.height - 0.5) * settings.fieldHeight);
+
+            return { x, y };
+        };
+
+        canvas.addEventListener('mousedown', (e) => {
+            const m = getMousePos(e);
+            const p = screenToPhysics(m.x, m.y);
+
+            // Check Receivers
+            for (const [id, rx] of this.receivers) {
+                const dx = p.x - rx.x;
+                const dy = p.y - rx.y;
+                const hitRadius = this.context.globalSettings.fieldWidth * 0.05;
+
+                if (Math.sqrt(dx * dx + dy * dy) < hitRadius) {
+                    isDragging = true;
+                    dragTarget = { type: 'receiver', id: id };
+                    this._selectReceiver(id);
+                    return;
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDragging || !dragTarget) {
+                // Hover cursor logic could go here
+                return;
+            }
+
+            const m = getMousePos(e);
+            const p = screenToPhysics(m.x, m.y);
+
+            if (dragTarget.type === 'receiver') {
+                const rx = this.receivers.get(dragTarget.id);
+                if (rx) {
+                    rx.x = p.x;
+                    rx.y = p.y;
+                }
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            dragTarget = null;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false;
+            dragTarget = null;
+        });
     }
 
     _setTargetProperty(prop, value) {
@@ -246,16 +316,7 @@ export class AppController {
         const array = this.context.getArray(this.selectedArrayId);
         if (!array) return;
 
-        const posX = document.getElementById('pos-x');
-        const posY = document.getElementById('pos-y');
         const nameInput = document.getElementById('array-name');
-
-        if (posX && posY) {
-            array.position = {
-                x: parseFloat(posX.value) || 0,
-                y: parseFloat(posY.value) || 0
-            };
-        }
 
         if (nameInput) {
             array.name = nameInput.value;
@@ -379,11 +440,6 @@ export class AppController {
         const nameInput = document.getElementById('array-name');
         if (nameInput) nameInput.value = array.name;
 
-        const posX = document.getElementById('pos-x');
-        const posY = document.getElementById('pos-y');
-        if (posX) posX.value = array.position.x;
-        if (posY) posY.value = array.position.y;
-
         const setSlider = (id, val, textId, fmt) => {
             const el = document.getElementById(id);
             if (el) el.value = val;
@@ -415,12 +471,32 @@ export class AppController {
 
     _addNewArray() {
         // Default new array uses normalized physics
+        // We want it to match the current scenario's scale
+        let freq = 1.0;
+        let pitch = 0.5; // Default to half-wavelength
+
+        // If we have a physics state, ensure we align with it
+        if (this.physicsState) {
+            // In normalized physics, base frequency is always 1.0
+            freq = 1.0;
+            // Pitch of 0.5 is 0.5 * lambda, which is standard
+            pitch = 0.5;
+        }
+
+        // Offset the new array slightly so it doesn't overlap perfectly
+        const count = this.context.getAllArrays().length;
+        const offset = (count % 2 === 0) ? 5.0 : -5.0;
+
         const arr = new PhasedArray({
-            name: 'New Array',
+            name: `Array ${count + 1}`,
             numElements: 16,
-            frequency: 1.0,
-            speedOfSound: 1.0
+            pitch: pitch,
+            frequency: freq,
+            speedOfSound: 1.0,
+            curvatureRadius: 10.0, // Reasonable default in wavelengths
+            position: { x: offset * Math.ceil(count / 2), y: 0 }
         });
+
         this.context.addArray(arr);
         this._refreshArrayDropdown();
         this._selectArray(arr.id);

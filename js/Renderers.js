@@ -172,15 +172,47 @@ export class BeamPatternRenderer {
             ctx.fillText(steerAngle + "°", lx, ly);
         }
 
-        const array = context.getArray(selectedArrayId);
-        if (!array) return;
+        // --- COMBINED BEAM PATTERN ---
+        const arrays = context.getAllArrays().filter(a => a.enabled);
+        if (arrays.length === 0) return;
+
+        // Calculate max possible amplitude for normalization
+        let totalMaxAmp = 0;
+        arrays.forEach(arr => {
+            totalMaxAmp += arr.numElements * arr.amplitude;
+        });
+        if (totalMaxAmp === 0) totalMaxAmp = 1;
+        const maxIntensity = totalMaxAmp * totalMaxAmp;
 
         ctx.strokeStyle = "#facc15";
         ctx.lineWidth = 2;
         ctx.beginPath();
 
         for (let steerAngle = -90; steerAngle <= 90; steerAngle++) {
-            const intensity = array.calculateBeamPattern(steerAngle);
+            const angleRad = steerAngle * Math.PI / 180;
+
+            // Direction vector (0 deg = +Y axis)
+            const dirX = Math.sin(angleRad);
+            const dirY = Math.cos(angleRad);
+
+            let realSum = 0;
+            let imagSum = 0;
+
+            arrays.forEach(arr => {
+                const k = 2 * Math.PI / arr.wavelength;
+                const elements = arr.getElementData(); // {x, y, phase, amplitude}
+
+                elements.forEach(el => {
+                    // Far-field path difference relative to origin (0,0)
+                    const pathLength = el.x * dirX + el.y * dirY;
+                    const totalPhase = k * pathLength + el.phase;
+
+                    realSum += el.amplitude * Math.cos(totalPhase);
+                    imagSum += el.amplitude * Math.sin(totalPhase);
+                });
+            });
+
+            const intensity = (realSum * realSum + imagSum * imagSum) / maxIntensity;
 
             const db = 10 * Math.log10(intensity + 0.00001);
             const minDb = -40;
