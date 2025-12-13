@@ -9,27 +9,26 @@
  * - curvatureRadius: meters
  * - focalDistance: meters
  * - fieldWidth/Height: meters
- * 
  */
 
 export const Scenarios = {
     /**
      * 5G MIMO Base Station
      * 
-     * Real-world: 28 GHz mmWave 5G
+     * 28 GHz mmWave 5G
      * - λ = c/f = 3e8 / 28e9 ≈ 10.7mm
      * - Typical array: 16 elements, 0.5λ spacing ≈ 5.35mm
      * - Far-field beam steering for mobile users
      */
     '5G_MIMO': {
-        name: '5G MIMO Base Station',
+        name: '5G MIMO Station',
         description: '28 GHz mmWave linear array for mobile beam steering.',
         arrays: [
             {
-                name: 'Base Station',
+                name: '5G Linear Array',
                 numElements: 16,
                 pitch: 0.00535,          // 5.35mm = 0.5λ at 28 GHz
-                frequency: 28e9,         // 28 GHz
+                frequency: 28e9,
                 steeringAngle: 0,
                 position: { x: 0, y: 0 },
                 geometry: 'linear',
@@ -55,7 +54,7 @@ export const Scenarios = {
     /**
      * Medical Ultrasound Imaging
      * 
-     * Real-world: 3.5 MHz abdominal convex probe
+     * 3.5 MHz abdominal convex probe
      * - λ = 1540 / 3.5e6 ≈ 0.44mm in tissue
      * - Convex probe radius: ~40mm
      * - Imaging depth: 15-20cm
@@ -95,7 +94,7 @@ export const Scenarios = {
     /**
      * HIFU Tumor Ablation
      * 
-     * Real-world: 1 MHz High-Intensity Focused Ultrasound
+     * 1 MHz High-Intensity Focused Ultrasound
      * - λ = 1540 / 1e6 ≈ 1.54mm in tissue
      * - Dual transducers for focused energy delivery
      * - Focal depth: ~100mm
@@ -148,7 +147,7 @@ export const Scenarios = {
     /**
      * Underwater SONAR
      * 
-     * Real-world: 50 kHz side-scan sonar
+     * 50 kHz side-scan sonar
      * - λ = 1500 / 50e3 = 30mm in water
      * - Multiple beams for wide coverage
      */

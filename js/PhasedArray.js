@@ -211,89 +211,44 @@ export class PhasedArray {
         const orientationRad = this._orientation * Math.PI / 180;
         const k = 2 * Math.PI / this._wavelength; // Wave number
 
-        if (this._geometry === 'linear') {
-            // For linear array: phase delay based on steering angle
-            // Delay = (d * sin(θ)) / c, where d is distance from center and c is speed of sound in the medium
-            const totalWidth = (n - 1) * this._pitch;
-            const startOffset = -totalWidth / 2;
+        // Calculate steering direction components (global coordinates)
+        const sinDir = Math.sin(steeringRad + orientationRad);
+        const cosDir = Math.cos(steeringRad + orientationRad);
 
-            for (let i = 0; i < n; i++) {
-                const localX = startOffset + i * this._pitch;
-                let phase = 0;
+        // Pre-calculate focal point if needed
+        let focalPoint = null;
+        if (isFinite(this._focalDistance)) {
+            focalPoint = {
+                x: this._position.x + this._focalDistance * sinDir,
+                y: this._position.y + this._focalDistance * cosDir
+            };
+        }
 
-                // Steering delay
-                const steeringDelay = localX * Math.sin(steeringRad);
-                phase -= k * steeringDelay / this._speedOfSound;
+        for (let i = 0; i < n; i++) {
+            const elemPos = this._elementPositions[i];
+            let phase = 0;
 
-                // Focusing delay (if focal distance is finite)
-                if (isFinite(this._focalDistance)) {
-                    const focalPoint = {
-                        x: this._position.x + this._focalDistance * Math.sin(steeringRad + orientationRad),
-                        y: this._position.y + this._focalDistance * Math.cos(steeringRad + orientationRad)
-                    };
+            if (focalPoint) {
+                // Near-field focusing: align phases to arrive at focal point simultaneously
+                const distToFocus = Math.sqrt(
+                    Math.pow(focalPoint.x - elemPos.x, 2) +
+                    Math.pow(focalPoint.y - elemPos.y, 2)
+                );
 
-                    const elemPos = this._elementPositions[i];
-                    const distToFocus = Math.sqrt(
-                        Math.pow(focalPoint.x - elemPos.x, 2) +
-                        Math.pow(focalPoint.y - elemPos.y, 2)
-                    );
+                // Phase correction relative to array center
+                phase -= k * (distToFocus - this._focalDistance);
+            } else {
+                // Far-field steering: align phases for plane wave in steering direction
+                const offsetX = elemPos.x - this._position.x;
+                const offsetY = elemPos.y - this._position.y;
 
-                    // Reference distance (from array center to focal point)
-                    const refDist = this._focalDistance;
+                // Projection of element position onto steering direction
+                const projection = offsetX * sinDir + offsetY * cosDir;
 
-                    // Phase correction to focus at the focal point
-                    phase -= k * (distToFocus - refDist);
-                }
-
-                this._elementPhases.push(phase);
+                phase -= k * projection;
             }
-        } else {
-            // For curved array: more complex phase calculation
-            // Each element has a different normal direction
-            for (let i = 0; i < n; i++) {
-                const elemPos = this._elementPositions[i];
-                let phase = 0;
 
-                if (isFinite(this._focalDistance)) {
-                    // Near-field focusing for curved array
-                    const focalPoint = {
-                        x: this._position.x + this._focalDistance * Math.sin(steeringRad + orientationRad),
-                        y: this._position.y + this._focalDistance * Math.cos(steeringRad + orientationRad)
-                    };
-
-                    const distToFocus = Math.sqrt(
-                        Math.pow(focalPoint.x - elemPos.x, 2) +
-                        Math.pow(focalPoint.y - elemPos.y, 2)
-                    );
-
-                    // Reference distance (from array center to focal point)
-                    const refDist = this._focalDistance;
-
-                    // Phase correction for focusing
-                    phase -= k * (distToFocus - refDist);
-                } else {
-                    // Far-field steering for curved array
-                    // Project element position onto steering direction
-                    const steeringDir = {
-                        x: Math.sin(steeringRad + orientationRad),
-                        y: Math.cos(steeringRad + orientationRad)
-                    };
-
-                    // Element offset from array center
-                    const offset = {
-                        x: elemPos.x - this._position.x,
-                        y: elemPos.y - this._position.y
-                    };
-
-                    // Projection onto steering direction
-                    const projection = offset.x * steeringDir.x + offset.y * steeringDir.y;
-
-                    // Phase delay
-                    phase -= k * projection;
-                }
-
-                this._elementPhases.push(phase);
-            }
+            this._elementPhases.push(phase);
         }
     }
 

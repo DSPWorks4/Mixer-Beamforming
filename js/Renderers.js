@@ -80,19 +80,20 @@ export class HeatmapRenderer {
         totalCount = allElements.length / 4;
 
         // --- DYNAMIC WAVELENGTH CALCULATION ---
-        // Use the global speed of sound (normalized to 1.0) and current frequency
+        // Use the global speed of sound 
         const speedOfSound = context.globalSettings.speedOfSound;
         const safeFreq = Math.max(0.1, avgFreq);
         const wavelength = speedOfSound / safeFreq;
 
         const u = (name) => gl.getUniformLocation(this.program, name);
+
+        //passing argument for drawing
         gl.uniform1f(u("u_time"), time);
         gl.uniform2f(u("u_resolution"), cvs.width, cvs.height);
         gl.uniform2f(u("u_fieldSize"), context.globalSettings.fieldWidth, context.globalSettings.fieldHeight);
         gl.uniform2f(u("u_fieldCenter"), context.globalSettings.fieldCenterX, context.globalSettings.fieldCenterY);
         gl.uniform1i(u("u_elementCount"), totalCount);
 
-        // Pass actual frequency and wavelength to shader
         gl.uniform1f(u("u_frequency"), safeFreq);
         gl.uniform1f(u("u_wavelength"), wavelength);
 
@@ -172,7 +173,7 @@ export class BeamPatternRenderer {
             ctx.fillText(steerAngle + "°", lx, ly);
         }
 
-        // --- COMBINED BEAM PATTERN ---
+
         const arrays = context.getAllArrays().filter(a => a.enabled);
         if (arrays.length === 0) return;
 
