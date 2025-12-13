@@ -247,6 +247,57 @@ export const Scenarios = {
             dynamicRange: 40,
             profileDepth: 0.2
         }
+    },
+
+    /**
+     * MVDR / Adaptive Tracking
+     * 
+     * Demonstrates adaptive beamforming where arrays automatically
+     * steer towards the signal source (Receiver/Probe).
+     */
+    'MVDR': {
+        name: 'MVDR (Adaptive Tracking)',
+        description: 'Arrays automatically steer to maximize signal at the probe position.',
+        arrays: [
+            {
+                name: 'Tracking Array 1',
+                numElements: 16,
+                pitch: 0.0043,
+                frequency: 40e3,
+                steeringAngle: 0,
+                position: { x: -0.1, y: 0 },
+                geometry: 'linear',
+                curvatureRadius: 0.05,
+                orientation: 0,
+                focalDistance: Infinity,
+                amplitude: 1.0,
+                enabled: true
+            },
+            {
+                name: 'Tracking Array 2',
+                numElements: 16,
+                pitch: 0.0043,
+                frequency: 40e3,
+                steeringAngle: 0,
+                position: { x: 0.1, y: 0 },
+                geometry: 'linear',
+                curvatureRadius: 0.05,
+                orientation: 0,
+                focalDistance: Infinity,
+                amplitude: 1.0,
+                enabled: true
+            }
+        ],
+        globalSettings: {
+            speedOfSound: 343,
+            fieldWidth: 0.4,
+            fieldHeight: 0.4,
+            fieldCenterX: 0,
+            fieldCenterY: 0.2,
+            displayMode: 0,
+            dynamicRange: 40,
+            profileDepth: 0.2
+        }
     }
 };
 

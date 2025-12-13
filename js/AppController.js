@@ -1,6 +1,6 @@
 import { PhasedArray, SimulationContext } from './PhasedArray.js';
 import { HeatmapRenderer, BeamPatternRenderer, ArrayVisualizationRenderer } from './Renderers.js';
-import { getScenario } from './Scenarios.js';
+import { getScenario, getScenarioList } from './Scenarios.js';
 
 export class AppController {
     constructor() {
@@ -17,6 +17,7 @@ export class AppController {
         this.selectedReceiverId = 'rx1';
         this.time = 0;
         this.lastTime = performance.now();
+        this.currentScenarioKey = null;
 
         // Physics State for UI conversion
         this.physicsState = {
@@ -32,6 +33,19 @@ export class AppController {
     }
 
     init() {
+        // Populate Scenario Dropdown
+        const scenarioSelect = document.getElementById('scenario-select');
+        if (scenarioSelect) {
+            scenarioSelect.innerHTML = '';
+            getScenarioList().forEach(sc => {
+                const opt = document.createElement('option');
+                opt.value = sc.key;
+                opt.innerText = sc.name;
+                scenarioSelect.appendChild(opt);
+            });
+            scenarioSelect.value = '5G_MIMO';
+        }
+
         // Enforce Normalized Physics (Units = Wavelengths)
         this.context.globalSettings.speedOfSound = 1.0;
 
@@ -329,6 +343,7 @@ export class AppController {
         const scenario = getScenario(key);
         if (!scenario) return;
 
+        this.currentScenarioKey = key;
         this.context.clearArrays();
         this.targets.clear(); // Clear smoothing targets
 
@@ -561,6 +576,40 @@ export class AppController {
         const dt = (now - this.lastTime) / 1000;
         this.lastTime = now;
 
+        // 0. ADAPTIVE TRACKING (MVDR Scenario)
+        if (this.currentScenarioKey === 'MVDR') {
+            const rx = this.receivers.get(this.selectedReceiverId);
+            if (rx) {
+                this.context.getAllArrays().forEach(arr => {
+                    if (!arr.enabled) return;
+
+                    // Calculate angle to receiver
+                    // atan2(dx, dy) gives angle from +Y axis (0 deg)
+                    // +X is +90 deg, -X is -90 deg
+                    const dx = rx.x - arr.position.x;
+                    const dy = rx.y - arr.position.y;
+
+                    // Convert to degrees
+                    let targetAngle = Math.atan2(dx, dy) * 180 / Math.PI;
+
+                    // Clamp to -90 to 90
+                    targetAngle = Math.max(-90, Math.min(90, targetAngle));
+
+                    // Apply directly (bypass smoothing for responsiveness)
+                    arr.steeringAngle = targetAngle;
+
+                    // Update UI if this is the selected array
+                    if (arr.id === this.selectedArrayId) {
+                        const sld = document.getElementById('sld-steer');
+                        const val = document.getElementById('val-steer');
+                        if (sld) sld.value = targetAngle;
+                        if (val) val.innerText = targetAngle.toFixed(1) + '°';
+                    }
+                });
+            }
+        }
+
+        // 
         // 1. APPLY SMOOTHING
         this._smoothUpdate();
 
