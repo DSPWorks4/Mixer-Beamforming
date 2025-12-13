@@ -19,7 +19,6 @@ export class AppController {
         this.lastTime = performance.now();
         this.currentScenarioKey = null;
 
-        // Physics State for UI conversion
         this.physicsState = {
             baseFrequency: 40000,
             speedOfSound: 343,
@@ -27,13 +26,12 @@ export class AppController {
             scaleFactor: 1.0 / (343 / 40000)
         };
 
-        // SMOOTHING STATE
         // Stores { target: val, current: val } for properties
         this.targets = new Map();
     }
 
     init() {
-        // Populate Scenario Dropdown
+        // Scenario Dropdown
         const scenarioSelect = document.getElementById('scenario-select');
         if (scenarioSelect) {
             scenarioSelect.innerHTML = '';
@@ -46,7 +44,6 @@ export class AppController {
             scenarioSelect.value = '5G_MIMO';
         }
 
-        // Enforce Normalized Physics (Units = Wavelengths)
         this.context.globalSettings.speedOfSound = 1.0;
 
         // 1. Initialize Renderers
@@ -261,11 +258,6 @@ export class AppController {
     _setTargetProperty(prop, value) {
         if (!this.selectedArrayId) return;
         const key = `${this.selectedArrayId}_${prop}`;
-
-        // Handle Freq scaling: UI 1.0 -> Physics 1.0 (Normalized)
-        // If prop is frequency, we map slider 1.0 to 1.0 Hz in normalized physics
-        // so no multiplication needed if we stick to normalized units.
-
         this.targets.set(key, value);
     }
 
@@ -348,7 +340,6 @@ export class AppController {
         this.targets.clear(); // Clear smoothing targets
 
         // 1. Determine Physics Basis
-        // We need a base frequency and speed of sound to define "1.0" (1 wavelength)
         // Default to 40kHz / 343m/s if not specified
         let baseFreq = 40000;
         let speedOfSound = 343;
@@ -598,7 +589,6 @@ export class AppController {
                     // Apply directly (bypass smoothing for responsiveness)
                     arr.steeringAngle = targetAngle;
 
-                    // Update UI if this is the selected array
                     if (arr.id === this.selectedArrayId) {
                         const sld = document.getElementById('sld-steer');
                         const val = document.getElementById('val-steer');
@@ -609,7 +599,6 @@ export class AppController {
             }
         }
 
-        // 
         // 1. APPLY SMOOTHING
         this._smoothUpdate();
 

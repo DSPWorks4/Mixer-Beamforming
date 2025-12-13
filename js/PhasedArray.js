@@ -520,18 +520,6 @@ export class SimulationContext {
     }
 
     /**
-     * Update global speed of sound
-     * @param {number} value
-     */
-    setSpeedOfSound(value) {
-        this.globalSettings.speedOfSound = value;
-        for (const array of this.arrays.values()) {
-            array.speedOfSound = value;
-        }
-        this._notifyListeners('settingsChanged', 'speedOfSound');
-    }
-
-    /**
      * Register a listener for context changes
      * @param {Function} callback
      */
