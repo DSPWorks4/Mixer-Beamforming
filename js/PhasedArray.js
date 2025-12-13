@@ -308,15 +308,17 @@ export class PhasedArray {
     }
 
     /**
-     * Calculate the beam pattern at a given angle (for far-field)
+     * Calculate the complex response (real, imag) at a given angle
      * @param {number} angle - Angle in degrees
-     * @returns {number} Normalized intensity (0-1)
+     * @returns {{real: number, imag: number}}
      */
-    calculateBeamPattern(angle) {
+    calculateComplexResponse(angle) {
         this._ensureCalculated();
 
         const angleRad = angle * Math.PI / 180;
         const k = 2 * Math.PI / this._wavelength;
+        const sinTheta = Math.sin(angleRad);
+        const cosTheta = Math.cos(angleRad);
 
         let realSum = 0;
         let imagSum = 0;
@@ -326,16 +328,28 @@ export class PhasedArray {
             const amplitude = this._amplitude;
 
             // Calculate phase contribution at this angle
-            const pathLength = pos.x * Math.sin(angleRad) + pos.y * Math.cos(angleRad);
+            // Path length difference relative to origin (0,0)
+            const pathLength = pos.x * sinTheta + pos.y * cosTheta;
             const totalPhase = k * pathLength + phase;
 
             realSum += amplitude * Math.cos(totalPhase);
             imagSum += amplitude * Math.sin(totalPhase);
         });
 
+        return { real: realSum, imag: imagSum };
+    }
+
+    /**
+     * Calculate the beam pattern at a given angle (for far-field)
+     * @param {number} angle - Angle in degrees
+     * @returns {number} Normalized intensity (0-1)
+     */
+    calculateBeamPattern(angle) {
+        const { real, imag } = this.calculateComplexResponse(angle);
+
         // Return normalized intensity
         const maxIntensity = this._numElements * this._numElements * this._amplitude * this._amplitude;
-        return (realSum * realSum + imagSum * imagSum) / maxIntensity;
+        return (real * real + imag * imag) / maxIntensity;
     }
 
     /**

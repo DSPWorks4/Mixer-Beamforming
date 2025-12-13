@@ -190,27 +190,13 @@ export class BeamPatternRenderer {
         ctx.beginPath();
 
         for (let steerAngle = -90; steerAngle <= 90; steerAngle++) {
-            const angleRad = steerAngle * Math.PI / 180;
-
-            // Direction vector (0 deg = +Y axis)
-            const dirX = Math.sin(angleRad);
-            const dirY = Math.cos(angleRad);
-
             let realSum = 0;
             let imagSum = 0;
 
             arrays.forEach(arr => {
-                const k = 2 * Math.PI / arr.wavelength;
-                const elements = arr.getElementData(); // {x, y, phase, amplitude}
-
-                elements.forEach(el => {
-                    // Far-field path difference relative to origin (0,0)
-                    const pathLength = el.x * dirX + el.y * dirY;
-                    const totalPhase = k * pathLength + el.phase;
-
-                    realSum += el.amplitude * Math.cos(totalPhase);
-                    imagSum += el.amplitude * Math.sin(totalPhase);
-                });
+                const response = arr.calculateComplexResponse(steerAngle);
+                realSum += response.real;
+                imagSum += response.imag;
             });
 
             const intensity = (realSum * realSum + imagSum * imagSum) / maxIntensity;
