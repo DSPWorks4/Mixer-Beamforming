@@ -8,9 +8,9 @@ uniform vec2 u_fieldSize;
 uniform vec2 u_fieldCenter;
 
 uniform vec4 u_elementPositions[64];
+uniform float u_elementFrequencies[64];   // Frequency for each element (Hz or normalized)
 uniform int u_elementCount;
-uniform float u_frequency;
-uniform float u_wavelength; 
+uniform float u_speedOfSound;             // Global speed of sound
 
 const float PI = 3.141592653589793;
 
@@ -28,19 +28,21 @@ void main() {
         if (i >= u_elementCount) break;
         
         vec4 elem = u_elementPositions[i];
+        float freq = u_elementFrequencies[i];
+        
         // elem.xy is in meters
         float dist = distance(pos, elem.xy);
         
         // spread factor
         float spread = 1.0 / sqrt(dist + 0.1); 
         
-        // k = 2PI / lambda
-        // phase = k * dist
-        float k = 2.0 * PI / u_wavelength;
+        // Calculate physics parameters for this specific element's frequency
+        float wavelength = u_speedOfSound / freq;
+        float k = 2.0 * PI / wavelength;
         
         // elem.z is the phase offset (phi) from PhasedArray
-        // u_time * 2.0 * PI * u_frequency is the temporal component (omega * t)
-        float totalPhase = k * dist - u_time * 2.0 * PI * u_frequency - elem.z;
+        // u_time * 2.0 * PI * freq is the temporal component (omega * t)
+        float totalPhase = k * dist - u_time * 2.0 * PI * freq - elem.z;
         fieldSum += sin(totalPhase) * spread * elem.w;
     }
     

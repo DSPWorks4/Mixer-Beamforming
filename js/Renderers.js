@@ -6,6 +6,7 @@
  * - ArrayVisualizationRenderer: Array elements and receiver visualization
  */
 
+// CORRECTION: Restored the './shaders/' path to match your folder structure
 import { vertexShaderSource } from './shaders/vertexShader.js';
 import { fragmentShaderSource } from './shaders/fragmentShader.js';
 
@@ -60,48 +61,53 @@ export class HeatmapRenderer {
         gl.useProgram(this.program);
 
         const allElements = [];
+        const allFrequencies = [];
         let totalCount = 0;
-        let avgFreq = 1.0;
 
-        // Determine average frequency from active arrays
-        const activeArrays = context.getAllArrays().filter(arr => arr.enabled);
-        if (activeArrays.length > 0) {
-            avgFreq = activeArrays[0].frequency;
-        }
-
+        // --- COLLECT DATA PER ELEMENT ---
+        // We now capture the specific frequency of each array
         context.getAllArrays().forEach(arr => {
             if (arr.enabled) {
                 const elements = arr.getElementData();
+                const freq = arr.frequency; // Get array's specific frequency
+
                 elements.forEach(el => {
                     allElements.push(el.x, el.y, el.phase, el.amplitude);
+                    allFrequencies.push(freq);
                 });
             }
         });
-        totalCount = allElements.length / 4;
 
-        // --- DYNAMIC WAVELENGTH CALCULATION ---
-        // Use the global speed of sound 
-        const speedOfSound = context.globalSettings.speedOfSound;
-        const safeFreq = Math.max(0.1, avgFreq);
-        const wavelength = speedOfSound / safeFreq;
+        totalCount = allFrequencies.length;
 
         const u = (name) => gl.getUniformLocation(this.program, name);
 
-        //passing argument for drawing
+        // --- GLOBAL UNIFORMS ---
         gl.uniform1f(u("u_time"), time);
         gl.uniform2f(u("u_resolution"), cvs.width, cvs.height);
         gl.uniform2f(u("u_fieldSize"), context.globalSettings.fieldWidth, context.globalSettings.fieldHeight);
         gl.uniform2f(u("u_fieldCenter"), context.globalSettings.fieldCenterX, context.globalSettings.fieldCenterY);
         gl.uniform1i(u("u_elementCount"), totalCount);
 
-        gl.uniform1f(u("u_frequency"), safeFreq);
-        gl.uniform1f(u("u_wavelength"), wavelength);
+        // Pass global speed of sound (usually 1.0 in normalized physics)
+        gl.uniform1f(u("u_speedOfSound"), context.globalSettings.speedOfSound);
 
+        // --- ELEMENT ARRAYS ---
         if (totalCount > 0) {
-            if (allElements.length > 256) allElements.length = 256;
-            const data = new Float32Array(256);
-            data.set(allElements);
-            gl.uniform4fv(u("u_elementPositions[0]"), data);
+            // Limit to 64 elements to match shader array size
+            const limit = 64;
+            if (allElements.length > limit * 4) allElements.length = limit * 4;
+            if (allFrequencies.length > limit) allFrequencies.length = limit;
+
+            // 1. Position/Phase/Amp Data (vec4 array)
+            const dataPos = new Float32Array(limit * 4);
+            dataPos.set(allElements);
+            gl.uniform4fv(u("u_elementPositions[0]"), dataPos);
+
+            // 2. Frequency Data (float array)
+            const dataFreq = new Float32Array(limit);
+            dataFreq.set(allFrequencies);
+            gl.uniform1fv(u("u_elementFrequencies[0]"), dataFreq);
         }
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
