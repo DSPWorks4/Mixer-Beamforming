@@ -72,7 +72,7 @@ export class AppController {
     }
 
     _bindEvents() {
-        // --- Scenario Loading ---
+        // Scenario Loading 
         const applyBtn = document.getElementById('apply-scenario');
         if (applyBtn) {
             applyBtn.addEventListener('click', () => {
@@ -80,7 +80,7 @@ export class AppController {
             });
         }
 
-        // --- Array Management ---
+        //  Array Management 
         const addArrayBtn = document.getElementById('add-array');
         if (addArrayBtn) addArrayBtn.addEventListener('click', () => this._addNewArray());
 
@@ -90,7 +90,7 @@ export class AppController {
         const arraySelect = document.getElementById('array-select');
         if (arraySelect) arraySelect.addEventListener('change', (e) => this._selectArray(parseInt(e.target.value)));
 
-        // --- Array Properties (SMOOTH Updates) ---
+        // Array Properties 
 
         const bindSlider = (id, prop, fmt, immediate = false) => {
             const el = document.getElementById(id);
@@ -124,6 +124,48 @@ export class AppController {
         bindSlider('sld-freq', 'frequency', v => this._formatFrequency(v), true);
         bindSlider('sld-steer', 'steeringAngle', v => v + '°', true);
 
+        // Focal Distance Controls
+        const sldFocus = document.getElementById('sld-focus');
+        const chkFocusInf = document.getElementById('chk-focus-inf');
+        const valFocus = document.getElementById('val-focus');
+
+        if (sldFocus && chkFocusInf) {
+            // Slider Change
+            sldFocus.addEventListener('input', (e) => {
+                if (chkFocusInf.checked) return;
+                const val = parseFloat(e.target.value);
+                if (valFocus) valFocus.innerText = val + 'λ';
+
+                // Apply immediately
+                const array = this.context.getArray(this.selectedArrayId);
+                if (array) {
+                    array.focalDistance = val;
+                    this._updateInfoPanel(array);
+                }
+            });
+
+            // Checkbox (Infinity) Toggle
+            chkFocusInf.addEventListener('change', (e) => {
+                const isInf = e.target.checked;
+                sldFocus.disabled = isInf;
+                sldFocus.style.opacity = isInf ? '0.5' : '1';
+
+                const array = this.context.getArray(this.selectedArrayId);
+                if (!array) return;
+
+                if (isInf) {
+                    array.focalDistance = Infinity;
+                    if (valFocus) valFocus.innerText = 'Infinity';
+                } else {
+                    // Revert to slider value
+                    const val = parseFloat(sldFocus.value);
+                    array.focalDistance = val;
+                    if (valFocus) valFocus.innerText = val + 'λ';
+                }
+                this._updateInfoPanel(array);
+            });
+        }
+
         // Geometry Radios (Immediate)
         document.querySelectorAll('input[name="geometry"]').forEach(r => {
             r.addEventListener('change', (e) => {
@@ -146,10 +188,10 @@ export class AppController {
             if (el) el.addEventListener('input', () => this._updateArrayFromInputs());
         });
 
-        // --- Interaction (Drag & Drop) ---
+        //  Interaction (Drag & Drop) 
         this._bindInteractionEvents();
 
-        // --- Receiver Management ---
+        //  Receiver Management 
         const addRxBtn = document.getElementById('add-receiver');
         if (addRxBtn) addRxBtn.addEventListener('click', () => this._addReceiver());
 
@@ -163,9 +205,6 @@ export class AppController {
                 this._updateInfoPanel(this.context.getArray(this.selectedArrayId));
             });
         }
-
-        // Receiver Position Inputs
-        // Removed as per request
 
         const speedSld = document.getElementById('sld-speed');
         if (speedSld) {
@@ -458,6 +497,27 @@ export class AppController {
         setSlider('sld-curve', array.curvatureRadius, 'val-curve', v => v + 'λ');
         setSlider('sld-freq', array.frequency, 'val-freq', v => v.toFixed(1) + 'x');
         setSlider('sld-steer', array.steeringAngle, 'val-steer', v => v + '°');
+
+        // Update Focus Controls 
+        const sldFocus = document.getElementById('sld-focus');
+        const chkFocusInf = document.getElementById('chk-focus-inf');
+        const valFocus = document.getElementById('val-focus');
+
+        if (sldFocus && chkFocusInf) {
+            if (array.focalDistance === Infinity || array.focalDistance > 1000) {
+                chkFocusInf.checked = true;
+                sldFocus.disabled = true;
+                sldFocus.style.opacity = '0.5';
+                if (valFocus) valFocus.innerText = 'Infinity';
+                sldFocus.value = 20;
+            } else {
+                chkFocusInf.checked = false;
+                sldFocus.disabled = false;
+                sldFocus.style.opacity = '1';
+                sldFocus.value = array.focalDistance;
+                if (valFocus) valFocus.innerText = array.focalDistance.toFixed(0) + 'λ';
+            }
+        }
 
         // Update pitch slider state based on element count
         this._updatePitchSliderState(array.numElements);

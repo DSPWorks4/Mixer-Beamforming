@@ -6,7 +6,6 @@
  * - ArrayVisualizationRenderer: Array elements and receiver visualization
  */
 
-// CORRECTION: Restored the './shaders/' path to match your folder structure
 import { vertexShaderSource } from './shaders/vertexShader.js';
 import { fragmentShaderSource } from './shaders/fragmentShader.js';
 
@@ -64,7 +63,6 @@ export class HeatmapRenderer {
         const allFrequencies = [];
         let totalCount = 0;
 
-        // --- COLLECT DATA PER ELEMENT ---
         // We now capture the specific frequency of each array
         context.getAllArrays().forEach(arr => {
             if (arr.enabled) {
@@ -82,7 +80,7 @@ export class HeatmapRenderer {
 
         const u = (name) => gl.getUniformLocation(this.program, name);
 
-        // --- GLOBAL UNIFORMS ---
+        // GLOBAL UNIFORMS 
         gl.uniform1f(u("u_time"), time);
         gl.uniform2f(u("u_resolution"), cvs.width, cvs.height);
         gl.uniform2f(u("u_fieldSize"), context.globalSettings.fieldWidth, context.globalSettings.fieldHeight);
@@ -92,7 +90,7 @@ export class HeatmapRenderer {
         // Pass global speed of sound (usually 1.0 in normalized physics)
         gl.uniform1f(u("u_speedOfSound"), context.globalSettings.speedOfSound);
 
-        // --- ELEMENT ARRAYS ---
+        // ELEMENT ARRAYS 
         if (totalCount > 0) {
             // Limit to 64 elements to match shader array size
             const limit = 64;
