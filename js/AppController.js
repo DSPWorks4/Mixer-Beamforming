@@ -124,6 +124,35 @@ export class AppController {
         bindSlider('sld-freq', 'frequency', v => this._formatFrequency(v), true);
         bindSlider('sld-steer', 'steeringAngle', v => v + '°', true);
 
+        // New Controls: Position, Orientation, Amplitude
+        // Position X/Y need special handling because 'position' is an object {x,y}
+        // We'll bind them manually below, or extend bindSlider. 
+        // For simplicity, let's bind them manually to handle the object structure.
+
+        const bindPosSlider = (axis) => {
+            const id = `sld-pos-${axis}`;
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                const labelEl = document.getElementById(`val-pos-${axis}`);
+                if (labelEl) labelEl.innerText = val.toFixed(1) + 'λ';
+
+                const array = this.context.getArray(this.selectedArrayId);
+                if (array) {
+                    // Update just one component of position
+                    const newPos = { ...array.position };
+                    newPos[axis] = val;
+                    array.position = newPos;
+                }
+            });
+        };
+        bindPosSlider('x');
+        bindPosSlider('y');
+
+        bindSlider('sld-orient', 'orientation', v => v + '°', true);
+        bindSlider('sld-amp', 'amplitude', v => v.toFixed(1), true);
+
         // Focal Distance Controls
         const sldFocus = document.getElementById('sld-focus');
         const chkFocusInf = document.getElementById('chk-focus-inf');
@@ -497,6 +526,12 @@ export class AppController {
         setSlider('sld-curve', array.curvatureRadius, 'val-curve', v => v + 'λ');
         setSlider('sld-freq', array.frequency, 'val-freq', v => v.toFixed(1) + 'x');
         setSlider('sld-steer', array.steeringAngle, 'val-steer', v => v + '°');
+
+        // New Controls Update
+        setSlider('sld-pos-x', array.position.x, 'val-pos-x', v => v.toFixed(1) + 'λ');
+        setSlider('sld-pos-y', array.position.y, 'val-pos-y', v => v.toFixed(1) + 'λ');
+        setSlider('sld-orient', array.orientation, 'val-orient', v => v + '°');
+        setSlider('sld-amp', array.amplitude, 'val-amp', v => v.toFixed(1));
 
         // Update Focus Controls 
         const sldFocus = document.getElementById('sld-focus');
