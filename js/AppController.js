@@ -124,10 +124,7 @@ export class AppController {
         bindSlider('sld-freq', 'frequency', v => this._formatFrequency(v), true);
         bindSlider('sld-steer', 'steeringAngle', v => v + '°', true);
 
-        // New Controls: Position, Orientation, Amplitude
         // Position X/Y need special handling because 'position' is an object {x,y}
-        // We'll bind them manually below, or extend bindSlider. 
-        // For simplicity, let's bind them manually to handle the object structure.
 
         const bindPosSlider = (axis) => {
             const id = `sld-pos-${axis}`;
